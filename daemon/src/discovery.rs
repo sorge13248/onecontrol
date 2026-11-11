@@ -1,7 +1,7 @@
+use socket2::{Domain, Protocol, Socket, Type};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
-use socket2::{Domain, Protocol, Socket, Type};
 use tokio::net::UdpSocket;
 use tracing::{debug, error, info, warn};
 
@@ -81,7 +81,10 @@ pub async fn start_discovery_service(config: Arc<Config>) {
             Ok((len, peer_addr)) => {
                 let msg = String::from_utf8_lossy(&buf[..len]);
                 if msg.contains(DISCOVERY_MAGIC_REQUEST) {
-                    debug!("Received discovery request from {}, sending reply", peer_addr);
+                    debug!(
+                        "Received discovery request from {}, sending reply",
+                        peer_addr
+                    );
                     if let Err(e) = udp.send_to(&reply_bytes, peer_addr).await {
                         warn!("Failed to send discovery reply to {}: {}", peer_addr, e);
                     }

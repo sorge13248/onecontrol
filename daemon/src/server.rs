@@ -1,6 +1,6 @@
+use futures_util::{SinkExt, StreamExt};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use futures_util::{SinkExt, StreamExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
 use tokio_tungstenite::tungstenite::Message;
@@ -43,7 +43,15 @@ pub async fn run_server(
                 let config_clone = config.clone();
 
                 tokio::spawn(async move {
-                    if let Err(e) = handle_connection(stream, peer_addr, config_clone, backend_clone, auth_clone).await {
+                    if let Err(e) = handle_connection(
+                        stream,
+                        peer_addr,
+                        config_clone,
+                        backend_clone,
+                        auth_clone,
+                    )
+                    .await
+                    {
                         debug!("Connection from {} closed with error: {}", peer_addr, e);
                     } else {
                         debug!("Connection from {} closed cleanly", peer_addr);
@@ -97,27 +105,39 @@ async fn handle_connection(
                 let err = ServerMessage::Error {
                     message: format!("Malformed message: {}", e),
                 };
-                let _ = ws_sender.send(Message::Text(serde_json::to_string(&err)?)).await;
+                let _ = ws_sender
+                    .send(Message::Text(serde_json::to_string(&err)?))
+                    .await;
                 continue;
             }
         };
 
         match client_msg {
-            ClientMessage::Handshake { client_id, client_name, token, locale } => {
+            ClientMessage::Handshake {
+                client_id,
+                client_name,
+                token,
+                locale,
+            } => {
                 current_client_id = Some(client_id.clone());
                 client_lang = Language::from_code(locale.as_deref());
                 let verified = auth.verify_token(&client_id, token.as_deref()).await;
 
                 if verified {
                     is_authenticated = true;
-                    info!("Client '{}' ({}) authenticated via token", client_name, client_id);
+                    info!(
+                        "Client '{}' ({}) authenticated via token",
+                        client_name, client_id
+                    );
                     let ack = ServerMessage::HandshakeAck {
                         status: AuthStatus::Authenticated,
                         server_name: config.device_name.clone(),
                         token: None,
                         message: i18n::msg_handshake_authenticated(client_lang).to_string(),
                     };
-                    ws_sender.send(Message::Text(serde_json::to_string(&ack)?)).await?;
+                    ws_sender
+                        .send(Message::Text(serde_json::to_string(&ack)?))
+                        .await?;
                 } else {
                     let _ = auth.request_pin(&client_id, &client_name).await;
                     let ack = ServerMessage::HandshakeAck {
@@ -126,7 +146,9 @@ async fn handle_connection(
                         token: None,
                         message: i18n::msg_handshake_need_pin(client_lang).to_string(),
                     };
-                    ws_sender.send(Message::Text(serde_json::to_string(&ack)?)).await?;
+                    ws_sender
+                        .send(Message::Text(serde_json::to_string(&ack)?))
+                        .await?;
                 }
             }
 
@@ -139,7 +161,9 @@ async fn handle_connection(
                             token: None,
                             message: i18n::msg_auth_no_handshake(client_lang).to_string(),
                         };
-                        ws_sender.send(Message::Text(serde_json::to_string(&ack)?)).await?;
+                        ws_sender
+                            .send(Message::Text(serde_json::to_string(&ack)?))
+                            .await?;
                         continue;
                     }
                 };
@@ -151,19 +175,25 @@ async fn handle_connection(
                         token: Some(new_token),
                         message: i18n::msg_auth_success(client_lang).to_string(),
                     };
-                    ws_sender.send(Message::Text(serde_json::to_string(&ack)?)).await?;
+                    ws_sender
+                        .send(Message::Text(serde_json::to_string(&ack)?))
+                        .await?;
                 } else {
                     let ack = ServerMessage::AuthAck {
                         success: false,
                         token: None,
                         message: i18n::msg_auth_invalid_pin(client_lang).to_string(),
                     };
-                    ws_sender.send(Message::Text(serde_json::to_string(&ack)?)).await?;
+                    ws_sender
+                        .send(Message::Text(serde_json::to_string(&ack)?))
+                        .await?;
                 }
             }
 
             ClientMessage::Ping => {
-                ws_sender.send(Message::Text(serde_json::to_string(&ServerMessage::Pong)?)).await?;
+                ws_sender
+                    .send(Message::Text(serde_json::to_string(&ServerMessage::Pong)?))
+                    .await?;
             }
 
             // Input commands require authentication
@@ -172,7 +202,9 @@ async fn handle_connection(
                     let err = ServerMessage::Error {
                         message: i18n::msg_error_unauthorized(client_lang).to_string(),
                     };
-                    ws_sender.send(Message::Text(serde_json::to_string(&err)?)).await?;
+                    ws_sender
+                        .send(Message::Text(serde_json::to_string(&err)?))
+                        .await?;
                     continue;
                 }
 

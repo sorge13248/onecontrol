@@ -90,7 +90,9 @@ pub fn msg_auth_invalid_pin(lang: Language) -> &'static str {
 
 pub fn msg_error_unauthorized(lang: Language) -> &'static str {
     match lang {
-        Language::It => "Accesso non autorizzato. Completa l'autenticazione prima di inviare comandi.",
+        Language::It => {
+            "Accesso non autorizzato. Completa l'autenticazione prima di inviare comandi."
+        }
         Language::En => "Unauthorized access. Complete authentication before sending commands.",
     }
 }
@@ -123,7 +125,13 @@ mod tests {
         assert!(en_body.contains("Device: Pixel 8"));
         assert!(en_body.contains("123456"));
 
-        assert_eq!(msg_auth_success(Language::It), "PIN corretto. Associazione completata.");
-        assert_eq!(msg_auth_success(Language::En), "Correct PIN. Pairing completed.");
+        assert_eq!(
+            msg_auth_success(Language::It),
+            "PIN corretto. Associazione completata."
+        );
+        assert_eq!(
+            msg_auth_success(Language::En),
+            "Correct PIN. Pairing completed."
+        );
     }
 }

@@ -1,5 +1,5 @@
-use std::error::Error;
 use crate::protocol::{ButtonAction, KeyAction, MouseButtonType};
+use std::error::Error;
 
 pub type InputResult<T> = Result<T, Box<dyn Error + Send + Sync>>;
 

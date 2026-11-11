@@ -24,7 +24,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .unwrap_or_else(|_| EnvFilter::new("info,onecontrol_daemon=debug"));
     tracing_subscriber::fmt().with_env_filter(filter).init();
 
-    info!("=== Starting OneControl Host Daemon v{} ===", env!("CARGO_PKG_VERSION"));
+    info!(
+        "=== Starting OneControl Host Daemon v{} ===",
+        env!("CARGO_PKG_VERSION")
+    );
 
     // Load configuration
     let config = Arc::new(config::Config::load_or_create());
@@ -38,7 +41,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         Ok(b) => Arc::new(Mutex::new(b)),
         Err(e) => {
             error!("Failed to initialize virtual input devices: {}", e);
-            error!("Ensure /dev/uinput is readable and writable by your user (e.g. udev rule or ACL).");
+            error!(
+                "Ensure /dev/uinput is readable and writable by your user (e.g. udev rule or ACL)."
+            );
             return Err(e);
         }
     };

@@ -1,6 +1,6 @@
-use std::collections::HashSet;
 use evdev::uinput::{VirtualDevice, VirtualDeviceBuilder};
 use evdev::{AttributeSet, EventType, InputEvent, Key, RelativeAxisType};
+use std::collections::HashSet;
 use tracing::{info, warn};
 
 use super::{InputBackend, InputResult};
@@ -42,10 +42,32 @@ impl LinuxUinputBackend {
 
         // Letters A-Z
         let letters = [
-            Key::KEY_A, Key::KEY_B, Key::KEY_C, Key::KEY_D, Key::KEY_E, Key::KEY_F, Key::KEY_G,
-            Key::KEY_H, Key::KEY_I, Key::KEY_J, Key::KEY_K, Key::KEY_L, Key::KEY_M, Key::KEY_N,
-            Key::KEY_O, Key::KEY_P, Key::KEY_Q, Key::KEY_R, Key::KEY_S, Key::KEY_T, Key::KEY_U,
-            Key::KEY_V, Key::KEY_W, Key::KEY_X, Key::KEY_Y, Key::KEY_Z,
+            Key::KEY_A,
+            Key::KEY_B,
+            Key::KEY_C,
+            Key::KEY_D,
+            Key::KEY_E,
+            Key::KEY_F,
+            Key::KEY_G,
+            Key::KEY_H,
+            Key::KEY_I,
+            Key::KEY_J,
+            Key::KEY_K,
+            Key::KEY_L,
+            Key::KEY_M,
+            Key::KEY_N,
+            Key::KEY_O,
+            Key::KEY_P,
+            Key::KEY_Q,
+            Key::KEY_R,
+            Key::KEY_S,
+            Key::KEY_T,
+            Key::KEY_U,
+            Key::KEY_V,
+            Key::KEY_W,
+            Key::KEY_X,
+            Key::KEY_Y,
+            Key::KEY_Z,
         ];
         for k in letters {
             kb_keys.insert(k);
@@ -53,8 +75,16 @@ impl LinuxUinputBackend {
 
         // Numbers 0-9
         let numbers = [
-            Key::KEY_0, Key::KEY_1, Key::KEY_2, Key::KEY_3, Key::KEY_4,
-            Key::KEY_5, Key::KEY_6, Key::KEY_7, Key::KEY_8, Key::KEY_9,
+            Key::KEY_0,
+            Key::KEY_1,
+            Key::KEY_2,
+            Key::KEY_3,
+            Key::KEY_4,
+            Key::KEY_5,
+            Key::KEY_6,
+            Key::KEY_7,
+            Key::KEY_8,
+            Key::KEY_9,
         ];
         for k in numbers {
             kb_keys.insert(k);
@@ -62,28 +92,63 @@ impl LinuxUinputBackend {
 
         // Modifiers & special keys
         let specials = [
-            Key::KEY_LEFTCTRL, Key::KEY_RIGHTCTRL,
-            Key::KEY_LEFTSHIFT, Key::KEY_RIGHTSHIFT,
-            Key::KEY_LEFTALT, Key::KEY_RIGHTALT,
-            Key::KEY_LEFTMETA, Key::KEY_RIGHTMETA,
-            Key::KEY_TAB, Key::KEY_ENTER, Key::KEY_ESC, Key::KEY_BACKSPACE,
-            Key::KEY_SPACE, Key::KEY_CAPSLOCK,
+            Key::KEY_LEFTCTRL,
+            Key::KEY_RIGHTCTRL,
+            Key::KEY_LEFTSHIFT,
+            Key::KEY_RIGHTSHIFT,
+            Key::KEY_LEFTALT,
+            Key::KEY_RIGHTALT,
+            Key::KEY_LEFTMETA,
+            Key::KEY_RIGHTMETA,
+            Key::KEY_TAB,
+            Key::KEY_ENTER,
+            Key::KEY_ESC,
+            Key::KEY_BACKSPACE,
+            Key::KEY_SPACE,
+            Key::KEY_CAPSLOCK,
             Key::KEY_PRINT, // STAMP / PrintScreen
-            Key::KEY_SCROLLLOCK, Key::KEY_PAUSE,
-            Key::KEY_INSERT, Key::KEY_DELETE,
-            Key::KEY_HOME, Key::KEY_END,
-            Key::KEY_PAGEUP, Key::KEY_PAGEDOWN,
-            Key::KEY_UP, Key::KEY_DOWN, Key::KEY_LEFT, Key::KEY_RIGHT,
+            Key::KEY_SCROLLLOCK,
+            Key::KEY_PAUSE,
+            Key::KEY_INSERT,
+            Key::KEY_DELETE,
+            Key::KEY_HOME,
+            Key::KEY_END,
+            Key::KEY_PAGEUP,
+            Key::KEY_PAGEDOWN,
+            Key::KEY_UP,
+            Key::KEY_DOWN,
+            Key::KEY_LEFT,
+            Key::KEY_RIGHT,
             // Function keys
-            Key::KEY_F1, Key::KEY_F2, Key::KEY_F3, Key::KEY_F4,
-            Key::KEY_F5, Key::KEY_F6, Key::KEY_F7, Key::KEY_F8,
-            Key::KEY_F9, Key::KEY_F10, Key::KEY_F11, Key::KEY_F12,
+            Key::KEY_F1,
+            Key::KEY_F2,
+            Key::KEY_F3,
+            Key::KEY_F4,
+            Key::KEY_F5,
+            Key::KEY_F6,
+            Key::KEY_F7,
+            Key::KEY_F8,
+            Key::KEY_F9,
+            Key::KEY_F10,
+            Key::KEY_F11,
+            Key::KEY_F12,
             // Punctuation & symbols
-            Key::KEY_MINUS, Key::KEY_EQUAL, Key::KEY_LEFTBRACE, Key::KEY_RIGHTBRACE,
-            Key::KEY_SEMICOLON, Key::KEY_APOSTROPHE, Key::KEY_GRAVE, Key::KEY_BACKSLASH,
-            Key::KEY_COMMA, Key::KEY_DOT, Key::KEY_SLASH,
+            Key::KEY_MINUS,
+            Key::KEY_EQUAL,
+            Key::KEY_LEFTBRACE,
+            Key::KEY_RIGHTBRACE,
+            Key::KEY_SEMICOLON,
+            Key::KEY_APOSTROPHE,
+            Key::KEY_GRAVE,
+            Key::KEY_BACKSLASH,
+            Key::KEY_COMMA,
+            Key::KEY_DOT,
+            Key::KEY_SLASH,
             // Media keys
-            Key::KEY_MUTE, Key::KEY_VOLUMEUP, Key::KEY_VOLUMEDOWN, Key::KEY_PLAYPAUSE,
+            Key::KEY_MUTE,
+            Key::KEY_VOLUMEUP,
+            Key::KEY_VOLUMEDOWN,
+            Key::KEY_PLAYPAUSE,
         ];
         for k in specials {
             kb_keys.insert(k);
@@ -155,10 +220,18 @@ impl InputBackend for LinuxUinputBackend {
         let mut events = Vec::new();
         if dy != 0 {
             // In Linux uinput, positive REL_WHEEL is scroll up, negative is down
-            events.push(InputEvent::new(EventType::RELATIVE, RelativeAxisType::REL_WHEEL.0, dy));
+            events.push(InputEvent::new(
+                EventType::RELATIVE,
+                RelativeAxisType::REL_WHEEL.0,
+                dy,
+            ));
         }
         if dx != 0 {
-            events.push(InputEvent::new(EventType::RELATIVE, RelativeAxisType::REL_HWHEEL.0, dx));
+            events.push(InputEvent::new(
+                EventType::RELATIVE,
+                RelativeAxisType::REL_HWHEEL.0,
+                dx,
+            ));
         }
         if !events.is_empty() {
             self.emit_mouse(&events)?;
@@ -169,24 +242,22 @@ impl InputBackend for LinuxUinputBackend {
     fn key_event(&mut self, key_str: &str, action: KeyAction) -> InputResult<()> {
         let key = map_key_string(key_str);
         match key {
-            Some(k) => {
-                match action {
-                    KeyAction::Down => {
-                        self.pressed_keys.insert(k);
-                        self.emit_keyboard(&[InputEvent::new(EventType::KEY, k.0, 1)])?;
-                    }
-                    KeyAction::Up => {
-                        self.pressed_keys.remove(&k);
-                        self.emit_keyboard(&[InputEvent::new(EventType::KEY, k.0, 0)])?;
-                    }
-                    KeyAction::Press => {
-                        self.pressed_keys.remove(&k);
-                        self.emit_keyboard(&[InputEvent::new(EventType::KEY, k.0, 1)])?;
-                        std::thread::sleep(std::time::Duration::from_millis(15));
-                        self.emit_keyboard(&[InputEvent::new(EventType::KEY, k.0, 0)])?;
-                    }
+            Some(k) => match action {
+                KeyAction::Down => {
+                    self.pressed_keys.insert(k);
+                    self.emit_keyboard(&[InputEvent::new(EventType::KEY, k.0, 1)])?;
                 }
-            }
+                KeyAction::Up => {
+                    self.pressed_keys.remove(&k);
+                    self.emit_keyboard(&[InputEvent::new(EventType::KEY, k.0, 0)])?;
+                }
+                KeyAction::Press => {
+                    self.pressed_keys.remove(&k);
+                    self.emit_keyboard(&[InputEvent::new(EventType::KEY, k.0, 1)])?;
+                    std::thread::sleep(std::time::Duration::from_millis(15));
+                    self.emit_keyboard(&[InputEvent::new(EventType::KEY, k.0, 0)])?;
+                }
+            },
             None => {
                 warn!("Unknown key requested: {}", key_str);
             }

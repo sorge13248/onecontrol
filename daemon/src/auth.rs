@@ -1,8 +1,8 @@
+use rand::Rng;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::sync::Arc;
-use rand::Rng;
-use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tracing::{info, warn};
 
@@ -120,7 +120,9 @@ impl AuthManager {
                 };
 
                 let mut store = self.store.lock().await;
-                store.authorized_tokens.insert(client_id.to_string(), token.clone());
+                store
+                    .authorized_tokens
+                    .insert(client_id.to_string(), token.clone());
                 Self::save_store(&store).await;
 
                 info!("Client '{}' successfully paired!", client_id);
