@@ -1,0 +1,26 @@
+# Gradle Wrapper & caches
+gradle-wrapper.jar
+/.gradle
+/captures/
+/gradlew
+/gradlew.bat
+/local.properties
+GeneratedPluginRegistrant.java
+.cxx/
+
+# Gradle build outputs (app/build and root build)
+build/
+
+# Kotlin compiler daemon cache & sessions
+.kotlin/
+
+# Keystores & Signing credentials
+# Remember to never publicly share your keystore.
+# See https://flutter.dev/to/reference-keystore
+key.properties
+**/*.keystore
+**/*.jks
+**/*.bks
+**/*.p12
+**/*.pem
+**/*.key

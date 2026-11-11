@@ -1,0 +1,220 @@
+name: Release & Distribute
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump_type:
+        description: 'Tipo di incremento versione (SemVer)'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+          - custom
+      custom_version:
+        description: 'Versione personalizzata (richiesta se bump_type = custom, es. 1.2.0)'
+        required: false
+        type: string
+        default: ''
+      prerelease:
+        description: 'Segna come Pre-Release'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  # ----------------------------------------------------------------------------
+  # 1. Version Bump & Git Tagging
+  # ----------------------------------------------------------------------------
+  bump-version:
+    name: Bump Version & Create Git Tag
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.bump.outputs.version }}
+      tag: ${{ steps.bump.outputs.tag }}
+      build_number: ${{ steps.bump.outputs.build_number }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Setup Rust (per sincronizzare Cargo.lock)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Execute Version Bump Script
+        id: bump
+        run: |
+          chmod +x scripts/bump-version.sh
+          ./scripts/bump-version.sh "${{ inputs.bump_type }}" "${{ inputs.custom_version }}"
+
+      - name: Commit & Push Version Bump and Git Tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add daemon/Cargo.toml daemon/Cargo.lock mobile/pubspec.yaml
+          git commit -m "chore(release): bump version to ${{ steps.bump.outputs.tag }} [skip ci]"
+          git tag -a "${{ steps.bump.outputs.tag }}" -m "Release ${{ steps.bump.outputs.tag }}"
+          git push origin HEAD:${{ github.ref_name }}
+          git push origin "${{ steps.bump.outputs.tag }}"
+
+  # ----------------------------------------------------------------------------
+  # 2. Build Rust Host Daemon (Linux 64-bit)
+  # ----------------------------------------------------------------------------
+  build-rust:
+    name: Build Rust Daemon (Linux x86_64)
+    needs: bump-version
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code at Tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.bump-version.outputs.tag }}
+
+      - name: Setup Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Build Optimized Release Binary
+        run: |
+          cd daemon
+          cargo build --release --target x86_64-unknown-linux-gnu
+          strip target/x86_64-unknown-linux-gnu/release/onecontrol-daemon
+
+      - name: Package Distributable Tarball
+        run: |
+          VER="${{ needs.bump-version.outputs.version }}"
+          PKG_NAME="onecontrol-daemon-v${VER}-linux-x86_64"
+          mkdir -p "$PKG_NAME"
+          cp daemon/target/x86_64-unknown-linux-gnu/release/onecontrol-daemon "$PKG_NAME/"
+          cp daemon/onecontrol.service "$PKG_NAME/"
+          cp README.md "$PKG_NAME/"
+          tar -czvf "${PKG_NAME}.tar.gz" "$PKG_NAME"
+          # Conserva anche il binario singolo eseguibile
+          cp daemon/target/x86_64-unknown-linux-gnu/release/onecontrol-daemon "onecontrol-daemon-linux-x86_64"
+
+      - name: Upload Rust Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-artifacts
+          path: |
+            onecontrol-daemon-*.tar.gz
+            onecontrol-daemon-linux-x86_64
+
+  # ----------------------------------------------------------------------------
+  # 3. Build Android APK (Flutter) - Supporto Completo Obtainium
+  # ----------------------------------------------------------------------------
+  build-android:
+    name: Build Android APK (Universal)
+    needs: bump-version
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code at Tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.bump-version.outputs.tag }}
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Flutter SDK
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Configure Keystore from Secrets
+        id: keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 --decode > mobile/android/release.jks
+            {
+              echo "storeFile=release.jks"
+              echo "storePassword=$KEYSTORE_PASSWORD"
+              echo "keyAlias=$KEY_ALIAS"
+              echo "keyPassword=$KEY_PASSWORD"
+            } > mobile/android/key.properties
+            echo "✔ Keystore configurato con successo da GitHub Secrets."
+          else
+            echo "::warning::Nessun Keystore configurato nei secrets! L'APK verrà firmato con la firma di debug standard."
+          fi
+
+      - name: Install Dependencies
+        run: |
+          cd mobile
+          flutter pub get
+
+      - name: Build Universal Release APK
+        run: |
+          cd mobile
+          flutter build apk --release
+
+      - name: Prepare APK Asset for Release
+        run: |
+          VER="${{ needs.bump-version.outputs.version }}"
+          mkdir -p apks/
+          cp mobile/build/app/outputs/flutter-apk/app-release.apk "apks/OneControl-v${VER}-universal.apk"
+
+      - name: Upload Android Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-artifacts
+          path: apks/*.apk
+
+  # ----------------------------------------------------------------------------
+  # 4. DevSecOps Integrity Checksums, SLSA Attestation & GitHub Release
+  # ----------------------------------------------------------------------------
+  publish-release:
+    name: Publish Release & Integrity Checksums
+    needs: [bump-version, build-rust, build-android]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Rust Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: rust-artifacts
+          path: release-assets
+
+      - name: Download Android Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: android-artifacts
+          path: release-assets
+
+      - name: Generate SHA-256 Checksums
+        run: |
+          cd release-assets
+          sha256sum * > checksums.txt
+          echo "=== SHA-256 Checksums ==="
+          cat checksums.txt
+
+      - name: Generate SLSA Build Attestation
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: 'release-assets/*'
+
+      - name: Publish GitHub Release (Compatible with Obtainium)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.bump-version.outputs.tag }}
+          name: "OneControl ${{ needs.bump-version.outputs.tag }}"
+          prerelease: ${{ inputs.prerelease }}
+          generate_release_notes: true
+          files: release-assets/*

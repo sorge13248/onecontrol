@@ -1,0 +1,12 @@
+[Unit]
+Description=OneControl Remote Control Host Daemon
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/onecontrol-daemon
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

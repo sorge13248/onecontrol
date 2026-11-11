@@ -1,0 +1,1713 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# OneControl - Unified CLI Management Script
+# ==============================================================================
+# Unified tool for compilation, installation, systemd service management,
+# execution, testing, and diagnostics of OneControl (Rust Host Daemon + Flutter Mobile).
+#
+# Supports automatic OS language detection (POSIX standard: LC_ALL / LC_MESSAGES / LANG)
+# with English as default and Italian for Italian locales.
+# Override anytime with: ONECONTROL_LANG=it or ONECONTROL_LANG=en
+# ==============================================================================
+
+set -euo pipefail
+
+# ------------------------------------------------------------------------------
+# Directories and Project Constants
+# ------------------------------------------------------------------------------
+SOURCE="${BASH_SOURCE[0]}"
+while [[ -h "$SOURCE" ]]; do
+    DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+    SOURCE="$(readlink "$SOURCE")"
+    [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+PROJECT_ROOT="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+DAEMON_DIR="$PROJECT_ROOT/daemon"
+MOBILE_DIR="$PROJECT_ROOT/mobile"
+DOCS_DIR="$PROJECT_ROOT/docs"
+
+DEFAULT_PORT=53842
+BIN_INSTALL_DIR="${BIN_INSTALL_DIR:-$HOME/.local/bin}"
+SYSTEMD_USER_DIR="${SYSTEMD_USER_DIR:-$HOME/.config/systemd/user}"
+CONFIG_DIR="${CONFIG_DIR:-$HOME/.config/onecontrol}"
+
+# ------------------------------------------------------------------------------
+# Automatic Language / Locale Detection (Linux Standard: LC_ALL, LC_MESSAGES, LANG)
+# ------------------------------------------------------------------------------
+detect_locale() {
+    local raw="${ONECONTROL_LANG:-${LC_ALL:-${LC_MESSAGES:-${LANG:-en}}}}"
+    local lower
+    lower="$(echo "$raw" | tr '[:upper:]' '[:lower:]')"
+    if [[ "$lower" =~ ^it ]]; then
+        echo "it"
+    else
+        echo "en"
+    fi
+}
+LOCALE="$(detect_locale)"
+
+# ------------------------------------------------------------------------------
+# Terminal Colors and Styling
+# ------------------------------------------------------------------------------
+if [[ -t 1 ]] && [[ "${NO_COLOR:-}" != "1" ]]; then
+    BOLD=$'\033[1m'
+    DIM=$'\033[2m'
+    RESET=$'\033[0m'
+    RED=$'\033[1;31m'
+    GREEN=$'\033[1;32m'
+    YELLOW=$'\033[1;33m'
+    BLUE=$'\033[1;34m'
+    CYAN=$'\033[1;36m'
+    MAGENTA=$'\033[1;35m'
+else
+    BOLD=""
+    DIM=""
+    RESET=""
+    RED=""
+    GREEN=""
+    YELLOW=""
+    BLUE=""
+    CYAN=""
+    MAGENTA=""
+fi
+
+log_info() {
+    echo -e "${BLUE}ℹ${RESET}  $*"
+}
+
+log_success() {
+    echo -e "${GREEN}✔${RESET}  ${BOLD}$*${RESET}"
+}
+
+log_warning() {
+    echo -e "${YELLOW}⚠${RESET}  ${BOLD}$*${RESET}"
+}
+
+log_error() {
+    echo -e "${RED}✖${RESET}  ${BOLD}$*${RESET}" >&2
+}
+
+log_header() {
+    echo -e "\n${CYAN}${BOLD}=== $* ===${RESET}"
+}
+
+# ------------------------------------------------------------------------------
+# Toolchain & Binary Resolution
+# ------------------------------------------------------------------------------
+get_cargo_bin() {
+    if command -v cargo &>/dev/null; then
+        command -v cargo
+        return 0
+    fi
+    if [[ -x "$HOME/.cargo/bin/cargo" ]]; then
+        echo "$HOME/.cargo/bin/cargo"
+        return 0
+    fi
+    return 1
+}
+
+get_rustc_bin() {
+    if command -v rustc &>/dev/null; then
+        command -v rustc
+        return 0
+    fi
+    if [[ -x "$HOME/.cargo/bin/rustc" ]]; then
+        echo "$HOME/.cargo/bin/rustc"
+        return 0
+    fi
+    return 1
+}
+
+get_flutter_bin() {
+    if [[ -n "${FLUTTER_BIN:-}" && -x "$FLUTTER_BIN" ]]; then
+        echo "$FLUTTER_BIN"
+        return 0
+    fi
+
+    if command -v flutter &>/dev/null; then
+        command -v flutter
+        return 0
+    fi
+
+    # Check in mobile/android/local.properties
+    local prop_file="$MOBILE_DIR/android/local.properties"
+    if [[ -f "$prop_file" ]]; then
+        local sdk_path
+        sdk_path=$(grep -E '^flutter.sdk=' "$prop_file" 2>/dev/null | cut -d'=' -f2- | tr -d '\r')
+        if [[ -n "$sdk_path" && -x "$sdk_path/bin/flutter" ]]; then
+            echo "$sdk_path/bin/flutter"
+            return 0
+        fi
+    fi
+
+    # Known system / installation paths
+    local candidate_paths=(
+        "/mnt/hdd3-linux-data/flutter/bin/flutter"
+        "$HOME/flutter/bin/flutter"
+        "/opt/flutter/bin/flutter"
+    )
+    for p in "${candidate_paths[@]}"; do
+        if [[ -x "$p" ]]; then
+            echo "$p"
+            return 0
+        fi
+    done
+
+    if [[ -n "${FLUTTER_ROOT:-}" && -x "$FLUTTER_ROOT/bin/flutter" ]]; then
+        echo "$FLUTTER_ROOT/bin/flutter"
+        return 0
+    fi
+
+    return 1
+}
+
+get_adb_bin() {
+    if [[ -n "${ADB_BIN:-}" && -x "$ADB_BIN" ]]; then
+        echo "$ADB_BIN"
+        return 0
+    fi
+
+    if command -v adb &>/dev/null; then
+        command -v adb
+        return 0
+    fi
+
+    local prop_file="$MOBILE_DIR/android/local.properties"
+    if [[ -f "$prop_file" ]]; then
+        local sdk_path
+        sdk_path=$(grep -E '^sdk.dir=' "$prop_file" 2>/dev/null | cut -d'=' -f2- | tr -d '\r')
+        if [[ -n "$sdk_path" && -x "$sdk_path/platform-tools/adb" ]]; then
+            echo "$sdk_path/platform-tools/adb"
+            return 0
+        fi
+    fi
+
+    local candidate_paths=(
+        "/mnt/hdd3-linux-data/android/platform-tools/adb"
+        "$HOME/Android/Sdk/platform-tools/adb"
+        "/opt/android-sdk/platform-tools/adb"
+    )
+    for p in "${candidate_paths[@]}"; do
+        if [[ -x "$p" ]]; then
+            echo "$p"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+setup_android_env() {
+    # Avoid permission issues with ADB if HOME is read-only (e.g. sandbox/container)
+    if [[ ! -w "$HOME" && ! -d "$HOME/.android" ]]; then
+        export ANDROID_USER_HOME="${ANDROID_USER_HOME:-/tmp/.android}"
+    fi
+
+    local prop_file="$MOBILE_DIR/android/local.properties"
+    if [[ -f "$prop_file" ]]; then
+        local sdk_path
+        sdk_path=$(grep -E '^sdk.dir=' "$prop_file" 2>/dev/null | cut -d'=' -f2- | tr -d '\r')
+        if [[ -n "$sdk_path" && -d "$sdk_path" ]]; then
+            export ANDROID_HOME="${ANDROID_HOME:-$sdk_path}"
+            export ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-$sdk_path}"
+        fi
+        local flutter_sdk
+        flutter_sdk=$(grep -E '^flutter.sdk=' "$prop_file" 2>/dev/null | cut -d'=' -f2- | tr -d '\r')
+        if [[ -n "$flutter_sdk" && -d "$flutter_sdk/bin" ]]; then
+            if [[ ":$PATH:" != *":$flutter_sdk/bin:"* ]]; then
+                export PATH="$flutter_sdk/bin:$PATH"
+            fi
+        fi
+    fi
+}
+
+# ------------------------------------------------------------------------------
+# Compilation Commands (Build)
+# ------------------------------------------------------------------------------
+build_rust() {
+    local mode="${1:-production}"
+    local cargo_bin
+    if ! cargo_bin=$(get_cargo_bin); then
+        if [[ "$LOCALE" == "it" ]]; then
+            log_error "Cargo/Rust non trovato nel sistema o in ~/.cargo/bin."
+            log_info "Installa Rust con: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
+        else
+            log_error "Cargo/Rust not found on system or in ~/.cargo/bin."
+            log_info "Install Rust using: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
+        fi
+        exit 1
+    fi
+
+    if [[ "$LOCALE" == "it" ]]; then
+        log_header "Compilazione Rust Host Daemon (Modalità: $mode)"
+    else
+        log_header "Compiling Rust Host Daemon (Mode: $mode)"
+    fi
+    cd "$DAEMON_DIR"
+
+    case "$mode" in
+        production|release)
+            if [[ "$LOCALE" == "it" ]]; then
+                log_info "Esecuzione: cargo build --release"
+            else
+                log_info "Running: cargo build --release"
+            fi
+            "$cargo_bin" build --release
+            local target_bin="$DAEMON_DIR/target/release/onecontrol-daemon"
+            if [[ -f "$target_bin" ]]; then
+                local size
+                size=$(du -h "$target_bin" | cut -f1)
+                if [[ "$LOCALE" == "it" ]]; then
+                    log_success "Build completata con successo! Binario: $target_bin ($size)"
+                else
+                    log_success "Build completed successfully! Binary: $target_bin ($size)"
+                fi
+            fi
+            ;;
+        debug)
+            if [[ "$LOCALE" == "it" ]]; then
+                log_info "Esecuzione: cargo build (debug)"
+            else
+                log_info "Running: cargo build (debug)"
+            fi
+            "$cargo_bin" build
+            local target_bin="$DAEMON_DIR/target/debug/onecontrol-daemon"
+            if [[ -f "$target_bin" ]]; then
+                local size
+                size=$(du -h "$target_bin" | cut -f1)
+                if [[ "$LOCALE" == "it" ]]; then
+                    log_success "Build debug completata con successo! Binario: $target_bin ($size)"
+                else
+                    log_success "Debug build completed successfully! Binary: $target_bin ($size)"
+                fi
+            fi
+            ;;
+        *)
+            if [[ "$LOCALE" == "it" ]]; then
+                log_error "Modalità di build Rust non valida: '$mode'. Usa 'production' (o 'release') o 'debug'."
+            else
+                log_error "Invalid Rust build mode: '$mode'. Use 'production' (or 'release') or 'debug'."
+            fi
+            exit 1
+            ;;
+    esac
+}
+
+build_flutter_android() {
+    local mode="${1:-production}"
+    setup_android_env
+
+    local flutter_bin
+    if ! flutter_bin=$(get_flutter_bin); then
+        if [[ "$LOCALE" == "it" ]]; then
+            log_error "Flutter SDK non trovato nel PATH o nei percorsi configurati."
+            log_info "Verifica la presenza di Flutter o imposta flutter.sdk in mobile/android/local.properties"
+        else
+            log_error "Flutter SDK not found in PATH or configured paths."
+            log_info "Ensure Flutter is installed or set flutter.sdk in mobile/android/local.properties"
+        fi
+        exit 1
+    fi
+
+    if [[ "$LOCALE" == "it" ]]; then
+        log_header "Compilazione Flutter Android (Modalità: $mode)"
+    else
+        log_header "Compiling Flutter Android (Mode: $mode)"
+    fi
+    cd "$MOBILE_DIR"
+
+    case "$mode" in
+        production|release)
+            if [[ "$LOCALE" == "it" ]]; then
+                log_info "Esecuzione: flutter build apk --release"
+            else
+                log_info "Running: flutter build apk --release"
+            fi
+            "$flutter_bin" build apk --release
+            local apk_path="$MOBILE_DIR/build/app/outputs/flutter-apk/app-release.apk"
+            if [[ -f "$apk_path" ]]; then
+                local size
+                size=$(du -h "$apk_path" | cut -f1)
+                if [[ "$LOCALE" == "it" ]]; then
+                    log_success "APK release generato con successo!"
+                    echo -e "  📁 Posizione: ${BOLD}$apk_path${RESET} ($size)"
+                    echo -e "  💡 Installa sullo smartphone con: ${CYAN}./onecontrol install-apk release${RESET}"
+                else
+                    log_success "Release APK generated successfully!"
+                    echo -e "  📁 Location: ${BOLD}$apk_path${RESET} ($size)"
+                    echo -e "  💡 Install on phone using: ${CYAN}./onecontrol install-apk release${RESET}"
+                fi
+            fi
+            ;;
+        debug)
+            if [[ "$LOCALE" == "it" ]]; then
+                log_info "Esecuzione: flutter build apk --debug"
+            else
+                log_info "Running: flutter build apk --debug"
+            fi
+            "$flutter_bin" build apk --debug
+            local apk_path="$MOBILE_DIR/build/app/outputs/flutter-apk/app-debug.apk"
+            if [[ -f "$apk_path" ]]; then
+                local size
+                size=$(du -h "$apk_path" | cut -f1)
+                if [[ "$LOCALE" == "it" ]]; then
+                    log_success "APK debug generato con successo!"
+                    echo -e "  📁 Posizione: ${BOLD}$apk_path${RESET} ($size)"
+                    echo -e "  💡 Installa sullo smartphone con: ${CYAN}./onecontrol install-apk debug${RESET}"
+                else
+                    log_success "Debug APK generated successfully!"
+                    echo -e "  📁 Location: ${BOLD}$apk_path${RESET} ($size)"
+                    echo -e "  💡 Install on phone using: ${CYAN}./onecontrol install-apk debug${RESET}"
+                fi
+            fi
+            ;;
+        split)
+            if [[ "$LOCALE" == "it" ]]; then
+                log_info "Esecuzione: flutter build apk --split-per-abi"
+            else
+                log_info "Running: flutter build apk --split-per-abi"
+            fi
+            "$flutter_bin" build apk --split-per-abi
+            local apk_dir="$MOBILE_DIR/build/app/outputs/flutter-apk"
+            if [[ "$LOCALE" == "it" ]]; then
+                log_success "APK suddivisi per architettura generati in $apk_dir:"
+            else
+                log_success "Architecture-split APKs generated in $apk_dir:"
+            fi
+            find "$apk_dir" -maxdepth 1 -name "app-*-release.apk" -exec du -h {} +
+            ;;
+        *)
+            if [[ "$LOCALE" == "it" ]]; then
+                log_error "Modalità di build Flutter non valida: '$mode'. Usa 'production', 'debug' o 'split'."
+            else
+                log_error "Invalid Flutter build mode: '$mode'. Use 'production', 'debug' or 'split'."
+            fi
+            exit 1
+            ;;
+    esac
+}
+
+cmd_build() {
+    local target="${1:-}"
+    shift || true
+
+    case "$target" in
+        rust)
+            local mode="${1:-production}"
+            build_rust "$mode"
+            ;;
+        flutter)
+            local platform="${1:-android}"
+            shift || true
+            case "$platform" in
+                android)
+                    local mode="${1:-production}"
+                    build_flutter_android "$mode"
+                    ;;
+                *)
+                    if [[ "$LOCALE" == "it" ]]; then
+                        log_error "Piattaforma Flutter non valida: '$platform'. Piattaforme supportate: 'android'."
+                    else
+                        log_error "Invalid Flutter platform: '$platform'. Supported platforms: 'android'."
+                    fi
+                    exit 1
+                    ;;
+            esac
+            ;;
+        all)
+            local mode="${1:-production}"
+            build_rust "$mode"
+            build_flutter_android "$mode"
+            ;;
+        "")
+            if [[ "$LOCALE" == "it" ]]; then
+                log_error "Parametro build mancante. Sintassi disponibili:"
+            else
+                log_error "Missing build target parameter. Available syntax:"
+            fi
+            echo -e "  ${CYAN}./onecontrol build rust [production|debug]${RESET}"
+            echo -e "  ${CYAN}./onecontrol build flutter android [production|debug|split]${RESET}"
+            echo -e "  ${CYAN}./onecontrol build all [production|debug]${RESET}"
+            exit 1
+            ;;
+        *)
+            if [[ "$LOCALE" == "it" ]]; then
+                log_error "Target di compilazione sconosciuto: '$target'."
+            else
+                log_error "Unknown build target: '$target'."
+            fi
+            exit 1
+            ;;
+    esac
+}
+
+# ------------------------------------------------------------------------------
+# Host Systemd Service Installation & Update
+# ------------------------------------------------------------------------------
+cmd_install() {
+    if [[ "$LOCALE" == "it" ]]; then
+        log_header "Installazione / Aggiornamento OneControl Host Daemon"
+        log_info "[1/4] Compilazione in modalità release (ottimizzata)..."
+    else
+        log_header "Installing / Updating OneControl Host Daemon"
+        log_info "[1/4] Compiling in release mode (optimized)..."
+    fi
+    build_rust "production"
+
+    local src_bin="$DAEMON_DIR/target/release/onecontrol-daemon"
+    if [[ ! -f "$src_bin" ]]; then
+        if [[ "$LOCALE" == "it" ]]; then
+            log_error "Binario compilato non trovato in $src_bin"
+        else
+            log_error "Compiled binary not found at $src_bin"
+        fi
+        exit 1
+    fi
+
+    # Step 2: Copy to user PATH ~/.local/bin
+    if [[ "$LOCALE" == "it" ]]; then
+        log_info "[2/4] Installazione del binario in $BIN_INSTALL_DIR/onecontrol-daemon..."
+    else
+        log_info "[2/4] Installing binary to $BIN_INSTALL_DIR/onecontrol-daemon..."
+    fi
+    mkdir -p "$BIN_INSTALL_DIR"
+    local dest_bin="$BIN_INSTALL_DIR/onecontrol-daemon"
+
+    # Atomic rename (mv) to support hot update without ETXTBSY
+    install -m 755 "$src_bin" "${dest_bin}.tmp"
+    mv -f "${dest_bin}.tmp" "$dest_bin"
+    if [[ "$LOCALE" == "it" ]]; then
+        log_success "Binario installato con successo: $dest_bin"
+    else
+        log_success "Binary installed successfully: $dest_bin"
+    fi
+
+    # Step 3: Install Systemd unit file and desktop icons
+    if [[ "$LOCALE" == "it" ]]; then
+        log_info "[3/4] Installazione della unit systemd e icone applicazione..."
+    else
+        log_info "[3/4] Installing systemd unit and application icons..."
+    fi
+    mkdir -p "$SYSTEMD_USER_DIR"
+    local src_service="$DAEMON_DIR/onecontrol.service"
+    local dest_service="$SYSTEMD_USER_DIR/onecontrol.service"
+
+    if [[ ! -f "$src_service" ]]; then
+        if [[ "$LOCALE" == "it" ]]; then
+            log_error "File di unit $src_service non trovato!"
+        else
+            log_error "Service unit file not found at $src_service!"
+        fi
+        exit 1
+    fi
+
+    install -m 644 "$src_service" "$dest_service"
+    if [[ "$LOCALE" == "it" ]]; then
+        log_success "Unit systemd installata in: $dest_service"
+    else
+        log_success "Systemd unit installed at: $dest_service"
+    fi
+
+    local icon_hicolor_dir="${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor"
+    mkdir -p "$icon_hicolor_dir/512x512/apps" "$icon_hicolor_dir/scalable/apps" 2>/dev/null || true
+    if [[ -f "$PROJECT_ROOT/assets/icons/onecontrol.png" && -d "$icon_hicolor_dir/512x512/apps" ]]; then
+        install -m 644 "$PROJECT_ROOT/assets/icons/onecontrol.png" "$icon_hicolor_dir/512x512/apps/onecontrol.png" 2>/dev/null || true
+    fi
+    if [[ -f "$PROJECT_ROOT/assets/icons/onecontrol.svg" && -d "$icon_hicolor_dir/scalable/apps" ]]; then
+        install -m 644 "$PROJECT_ROOT/assets/icons/onecontrol.svg" "$icon_hicolor_dir/scalable/apps/onecontrol.svg" 2>/dev/null || true
+    fi
+
+    # Step 4: Systemd reload and service activation
+    if [[ "$LOCALE" == "it" ]]; then
+        log_info "[4/4] Ricarica del demone systemd e attivazione/riavvio del servizio..."
+    else
+        log_info "[4/4] Reloading systemd daemon and enabling/restarting service..."
+    fi
+    
+    # Ensure XDG_RUNTIME_DIR is populated if available
+    if [[ -z "${XDG_RUNTIME_DIR:-}" && -d "/run/user/$(id -u)" ]]; then
+        export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+    fi
+
+    if systemctl --user daemon-reload 2>/dev/null; then
+        systemctl --user enable onecontrol.service 2>/dev/null || true
+        systemctl --user restart onecontrol.service
+
+        sleep 0.5
+        if systemctl --user is-active --quiet onecontrol.service; then
+            local pid
+            pid=$(systemctl --user show --property MainPID --value onecontrol.service 2>/dev/null || true)
+            if [[ "$LOCALE" == "it" ]]; then
+                log_success "Servizio OneControl attivo ed in esecuzione! (PID: ${pid:-attivo})"
+            else
+                log_success "OneControl service active and running! (PID: ${pid:-active})"
+            fi
+        else
+            if [[ "$LOCALE" == "it" ]]; then
+                log_warning "Il servizio è stato registrato ma non risulta in stato 'active'."
+                log_info "Visualizza i log di errore con: journalctl --user -u onecontrol -n 25 --no-pager"
+            else
+                log_warning "The service was registered but is not currently 'active'."
+                log_info "View error logs with: journalctl --user -u onecontrol -n 25 --no-pager"
+            fi
+        fi
+    else
+        if [[ "$LOCALE" == "it" ]]; then
+            log_warning "Impossibile comunicare direttamente con il gestore systemd utente in questa sessione."
+            log_info "I file sono stati installati. Per completare l'avvio nel tuo ambiente desktop esegui:"
+            echo -e "  ${CYAN}systemctl --user daemon-reload${RESET}"
+            echo -e "  ${CYAN}systemctl --user enable --now onecontrol.service${RESET}"
+        else
+            log_warning "Could not communicate directly with the user systemd manager in this session."
+            log_info "Files were installed. To start the service in your desktop session, run:"
+            echo -e "  ${CYAN}systemctl --user daemon-reload${RESET}"
+            echo -e "  ${CYAN}systemctl --user enable --now onecontrol.service${RESET}"
+        fi
+    fi
+
+    # Post-installation checks
+    echo ""
+    if [[ "$LOCALE" == "it" ]]; then
+        log_header "Riepilogo Installazione e Controlli"
+    else
+        log_header "Installation Summary & Health Checks"
+    fi
+
+    # Check if ~/.local/bin is in PATH
+    if [[ ":$PATH:" != *":$BIN_INSTALL_DIR:"* ]]; then
+        if [[ "$LOCALE" == "it" ]]; then
+            log_warning "$BIN_INSTALL_DIR non è presente nella variabile PATH corrente."
+            echo -e "  Aggiungi al tuo ${BOLD}~/.bashrc${RESET} o ${BOLD}~/.zshrc${RESET}:"
+            echo -e "  ${CYAN}export PATH=\"\$HOME/.local/bin:\$PATH\"${RESET}"
+        else
+            log_warning "$BIN_INSTALL_DIR is not present in your current PATH variable."
+            echo -e "  Add this to your ${BOLD}~/.bashrc${RESET} or ${BOLD}~/.zshrc${RESET}:"
+            echo -e "  ${CYAN}export PATH=\"\$HOME/.local/bin:\$PATH\"${RESET}"
+        fi
+    else
+        if [[ "$LOCALE" == "it" ]]; then
+            log_success "$BIN_INSTALL_DIR è presente nel PATH di sistema."
+        else
+            log_success "$BIN_INSTALL_DIR is present in the system PATH."
+        fi
+    fi
+
+    # Check /dev/uinput permissions
+    if [[ -r /dev/uinput && -w /dev/uinput ]]; then
+        if [[ "$LOCALE" == "it" ]]; then
+            log_success "Permessi su /dev/uinput verificati (lettura e scrittura OK)."
+        else
+            log_success "Permissions on /dev/uinput verified (read and write OK)."
+        fi
+    else
+        if [[ "$LOCALE" == "it" ]]; then
+            log_warning "Attenzione: l'utente '$USER' non ha attualmente permessi di scrittura su /dev/uinput!"
+            log_info "Configura i permessi necessari eseguendo:"
+            echo -e "  ${CYAN}./onecontrol setup uinput${RESET}"
+        else
+            log_warning "Notice: user '$USER' does not currently have write access to /dev/uinput!"
+            log_info "Configure required permissions by running:"
+            echo -e "  ${CYAN}./onecontrol setup uinput${RESET}"
+        fi
+    fi
+
+    echo ""
+    if [[ "$LOCALE" == "it" ]]; then
+        log_success "Installazione / Aggiornamento completato con successo!"
+        echo -e "Comandi utili:"
+        echo -e "  Stato del servizio:     ${CYAN}./onecontrol status${RESET}"
+        echo -e "  Log in tempo reale:     ${CYAN}./onecontrol logs -f${RESET}"
+        echo -e "  Riavvio del servizio:   ${CYAN}./onecontrol restart${RESET}"
+        echo -e "  Arresto del servizio:   ${CYAN}./onecontrol stop${RESET}"
+    else
+        log_success "Installation / Update completed successfully!"
+        echo -e "Useful commands:"
+        echo -e "  Service status:   ${CYAN}./onecontrol status${RESET}"
+        echo -e "  Real-time logs:   ${CYAN}./onecontrol logs -f${RESET}"
+        echo -e "  Restart service:  ${CYAN}./onecontrol restart${RESET}"
+        echo -e "  Stop service:     ${CYAN}./onecontrol stop${RESET}"
+    fi
+}
+
+cmd_uninstall() {
+    if [[ "$LOCALE" == "it" ]]; then
+        log_header "Disinstallazione OneControl Host Daemon"
+    else
+        log_header "Uninstalling OneControl Host Daemon"
+    fi
+
+    if [[ -z "${XDG_RUNTIME_DIR:-}" && -d "/run/user/$(id -u)" ]]; then
+        export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+    fi
+
+    if [[ "$LOCALE" == "it" ]]; then
+        log_info "Arresto e disabilitazione della unit systemd..."
+    else
+        log_info "Stopping and disabling systemd unit..."
+    fi
+    systemctl --user stop onecontrol.service 2>/dev/null || true
+    systemctl --user disable onecontrol.service 2>/dev/null || true
+
+    local service_file="$SYSTEMD_USER_DIR/onecontrol.service"
+    if [[ -f "$service_file" ]]; then
+        rm -f "$service_file"
+        if [[ "$LOCALE" == "it" ]]; then
+            log_success "Rimosso: $service_file"
+        else
+            log_success "Removed: $service_file"
+        fi
+    fi
+
+    systemctl --user daemon-reload 2>/dev/null || true
+
+    local bin_file="$BIN_INSTALL_DIR/onecontrol-daemon"
+    if [[ -f "$bin_file" ]]; then
+        rm -f "$bin_file"
+        if [[ "$LOCALE" == "it" ]]; then
+            log_success "Rimosso: $bin_file"
+        else
+            log_success "Removed: $bin_file"
+        fi
+    fi
+
+    local icon_hicolor_dir="${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor"
+    rm -f "$icon_hicolor_dir/512x512/apps/onecontrol.png" 2>/dev/null || true
+    rm -f "$icon_hicolor_dir/scalable/apps/onecontrol.svg" 2>/dev/null || true
+
+    if [[ "$LOCALE" == "it" ]]; then
+        log_success "Disinstallazione completata."
+        if [[ -d "$CONFIG_DIR" ]]; then
+            log_info "I dati di configurazione e pairing sono stati mantenuti in: $CONFIG_DIR"
+            echo -e "  Per rimuoverli del tutto: ${CYAN}rm -rf \"$CONFIG_DIR\"${RESET}"
+        fi
+    else
+        log_success "Uninstallation completed."
+        if [[ -d "$CONFIG_DIR" ]]; then
+            log_info "Configuration and paired client data were preserved in: $CONFIG_DIR"
+            echo -e "  To remove them completely: ${CYAN}rm -rf \"$CONFIG_DIR\"${RESET}"
+        fi
+    fi
+}
+
+# ------------------------------------------------------------------------------
+# Systemd Service Management (Status, Start, Stop, Restart, Logs)
+# ------------------------------------------------------------------------------
+ensure_xdg_runtime() {
+    if [[ -z "${XDG_RUNTIME_DIR:-}" && -d "/run/user/$(id -u)" ]]; then
+        export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+    fi
+}
+
+cmd_status() {
+    ensure_xdg_runtime
+    if [[ "$LOCALE" == "it" ]]; then
+        log_header "Stato Servizio OneControl Host"
+    else
+        log_header "OneControl Host Service Status"
+    fi
+
+    local is_active="unknown"
+    local is_enabled="unknown"
+    if systemctl --user is-active --quiet onecontrol.service 2>/dev/null; then
+        is_active="${GREEN}$( [[ "$LOCALE" == "it" ]] && echo "attivo (running)" || echo "active (running)" )${RESET}"
+    else
+        is_active="${RED}$( [[ "$LOCALE" == "it" ]] && echo "inattivo (stopped)" || echo "inactive (stopped)" )${RESET}"
+    fi
+
+    if systemctl --user is-enabled --quiet onecontrol.service 2>/dev/null; then
+        is_enabled="${GREEN}$( [[ "$LOCALE" == "it" ]] && echo "abilitato (avvio automatico al login)" || echo "enabled (starts automatically on login)" )${RESET}"
+    else
+        is_enabled="${YELLOW}$( [[ "$LOCALE" == "it" ]] && echo "disabilitato" || echo "disabled" )${RESET}"
+    fi
+
+    if [[ "$LOCALE" == "it" ]]; then
+        echo -e "  • Servizio Systemd:     $is_active"
+        echo -e "  • Avvio Automatico:     $is_enabled"
+    else
+        echo -e "  • Systemd Service:    $is_active"
+        echo -e "  • Autostart on Login: $is_enabled"
+    fi
+
+    # Check daemon process
+    local pids
+    pids=$(pgrep -d', ' onecontrol-daemon 2>/dev/null || true)
+    if [[ -n "$pids" ]]; then
+        if [[ "$LOCALE" == "it" ]]; then
+            echo -e "  • Processo demone:      ${GREEN}in esecuzione${RESET} (PID: $pids)"
+        else
+            echo -e "  • Daemon Process:     ${GREEN}running${RESET} (PID: $pids)"
+        fi
+    else
+        if [[ "$LOCALE" == "it" ]]; then
+            echo -e "  • Processo demone:      ${RED}non trovato${RESET}"
+        else
+            echo -e "  • Daemon Process:     ${RED}not found${RESET}"
+        fi
+    fi
+
+    # Check listening network port
+    local port_info=""
+    if command -v ss &>/dev/null; then
+        port_info=$(ss -tulpn 2>/dev/null | grep ":$DEFAULT_PORT " || true)
+    elif command -v lsof &>/dev/null; then
+        port_info=$(lsof -i ":$DEFAULT_PORT" 2>/dev/null || true)
+    fi
+
+    if [[ -n "$port_info" ]]; then
+        if [[ "$LOCALE" == "it" ]]; then
+            echo -e "  • Porta di rete ($DEFAULT_PORT): ${GREEN}in ascolto${RESET}"
+        else
+            echo -e "  • Network Port ($DEFAULT_PORT): ${GREEN}listening${RESET}"
+        fi
+    else
+        if [[ "$LOCALE" == "it" ]]; then
+            echo -e "  • Porta di rete ($DEFAULT_PORT): ${YELLOW}nessun processo rilevato in ascolto${RESET}"
+        else
+            echo -e "  • Network Port ($DEFAULT_PORT): ${YELLOW}no process detected listening${RESET}"
+        fi
+    fi
+
+    # Paired clients
+    local auth_file="$CONFIG_DIR/authorized_clients.json"
+    if [[ -f "$auth_file" ]]; then
+        local client_count=0
+        if command -v jq &>/dev/null; then
+            client_count=$(jq '.authorized_tokens | length' "$auth_file" 2>/dev/null || echo 0)
+        elif command -v python3 &>/dev/null; then
+            client_count=$(python3 -c "import json; f=open('$auth_file'); d=json.load(f); print(len(d.get('authorized_tokens', {})))" 2>/dev/null || echo 0)
+        else
+            client_count=$(grep -c '": "' "$auth_file" 2>/dev/null || echo 0)
+        fi
+        if [[ "$LOCALE" == "it" ]]; then
+            echo -e "  • Client accoppiati:    ${BOLD}$client_count${RESET} dispositivo/i registrato/i in $auth_file"
+        else
+            echo -e "  • Paired Clients:     ${BOLD}$client_count${RESET} device(s) registered in $auth_file"
+        fi
+    fi
+
+    echo ""
+    if [[ "$LOCALE" == "it" ]]; then
+        log_info "Dettagli completi systemd:"
+        systemctl --user status onecontrol.service --no-pager 2>/dev/null || log_warning "Impossibile recuperare lo status systemd dettagliato."
+    else
+        log_info "Detailed systemd status:"
+        systemctl --user status onecontrol.service --no-pager 2>/dev/null || log_warning "Could not retrieve detailed systemd status."
+    fi
+}
+
+cmd_start() {
+    ensure_xdg_runtime
+    if [[ "$LOCALE" == "it" ]]; then
+        log_info "Avvio del servizio onecontrol..."
+    else
+        log_info "Starting onecontrol service..."
+    fi
+    systemctl --user start onecontrol.service
+    cmd_status
+}
+
+cmd_stop() {
+    ensure_xdg_runtime
+    if [[ "$LOCALE" == "it" ]]; then
+        log_info "Arresto del servizio onecontrol..."
+    else
+        log_info "Stopping onecontrol service..."
+    fi
+    systemctl --user stop onecontrol.service
+    if [[ "$LOCALE" == "it" ]]; then
+        log_success "Servizio arrestato."
+    else
+        log_success "Service stopped."
+    fi
+}
+
+cmd_restart() {
+    ensure_xdg_runtime
+    if [[ "$LOCALE" == "it" ]]; then
+        log_info "Riavvio del servizio onecontrol..."
+    else
+        log_info "Restarting onecontrol service..."
+    fi
+    systemctl --user restart onecontrol.service
+    cmd_status
+}
+
+cmd_logs() {
+    ensure_xdg_runtime
+    local follow=false
+    local lines=50
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -f|--follow)
+                follow=true
+                shift
+                ;;
+            -n|--lines)
+                lines="${2:-50}"
+                shift 2 || shift
+                ;;
+            *)
+                shift
+                ;;
+        esac
+    done
+
+    if [[ "$LOCALE" == "it" ]]; then
+        log_header "Log di OneControl Host Daemon"
+        if [[ "$follow" == true ]]; then
+            log_info "Seguendo i log in tempo reale (premi Ctrl+C per uscire)..."
+            journalctl --user -u onecontrol -n "$lines" -f
+        else
+            journalctl --user -u onecontrol -n "$lines" --no-pager
+        fi
+    else
+        log_header "OneControl Host Daemon Logs"
+        if [[ "$follow" == true ]]; then
+            log_info "Streaming logs in real-time (press Ctrl+C to exit)..."
+            journalctl --user -u onecontrol -n "$lines" -f
+        else
+            journalctl --user -u onecontrol -n "$lines" --no-pager
+        fi
+    fi
+}
+
+# ------------------------------------------------------------------------------
+# Local Execution / Development (Run)
+# ------------------------------------------------------------------------------
+cmd_run() {
+    local target="${1:-}"
+    shift || true
+
+    case "$target" in
+        rust)
+            local mode="${1:-debug}"
+            if [[ "$LOCALE" == "it" ]]; then
+                log_header "Avvio OneControl Host in primo piano ($mode)"
+            else
+                log_header "Starting OneControl Host in foreground ($mode)"
+            fi
+            cd "$DAEMON_DIR"
+
+            local bin_path
+            if [[ "$mode" == "production" || "$mode" == "release" ]]; then
+                bin_path="$DAEMON_DIR/target/release/onecontrol-daemon"
+                if [[ ! -f "$bin_path" ]]; then
+                    if [[ "$LOCALE" == "it" ]]; then
+                        log_warning "Binario release non presente, compilo adesso..."
+                    else
+                        log_warning "Release binary not found, compiling now..."
+                    fi
+                    build_rust "production"
+                fi
+            else
+                bin_path="$DAEMON_DIR/target/debug/onecontrol-daemon"
+                if [[ ! -f "$bin_path" ]]; then
+                    if [[ "$LOCALE" == "it" ]]; then
+                        log_warning "Binario debug non presente, compilo adesso..."
+                    else
+                        log_warning "Debug binary not found, compiling now..."
+                    fi
+                    build_rust "debug"
+                fi
+            fi
+
+            if [[ "$LOCALE" == "it" ]]; then
+                log_info "Esecuzione di: $bin_path"
+            else
+                log_info "Running: $bin_path"
+            fi
+            export RUST_LOG="${RUST_LOG:-info,onecontrol_daemon=debug}"
+            exec "$bin_path"
+            ;;
+        flutter)
+            local platform="${1:-android}"
+            setup_android_env
+            local flutter_bin
+            if ! flutter_bin=$(get_flutter_bin); then
+                if [[ "$LOCALE" == "it" ]]; then
+                    log_error "Flutter non trovato nel PATH."
+                else
+                    log_error "Flutter not found in PATH."
+                fi
+                exit 1
+            fi
+            if [[ "$LOCALE" == "it" ]]; then
+                log_header "Avvio Flutter Mobile App ($platform)"
+            else
+                log_header "Starting Flutter Mobile App ($platform)"
+            fi
+            cd "$MOBILE_DIR"
+            exec "$flutter_bin" run
+            ;;
+        *)
+            if [[ "$LOCALE" == "it" ]]; then
+                log_error "Target di esecuzione non valido: '$target'. Usa 'rust [debug|production]' o 'flutter'."
+            else
+                log_error "Invalid run target: '$target'. Use 'rust [debug|production]' or 'flutter'."
+            fi
+            exit 1
+            ;;
+    esac
+}
+
+# ------------------------------------------------------------------------------
+# Automated Tests
+# ------------------------------------------------------------------------------
+cmd_test() {
+    local target="${1:-all}"
+    local cargo_bin
+    local flutter_bin
+
+    case "$target" in
+        rust)
+            cargo_bin=$(get_cargo_bin) || {
+                [[ "$LOCALE" == "it" ]] && log_error "Cargo non trovato" || log_error "Cargo not found";
+                exit 1;
+            }
+            if [[ "$LOCALE" == "it" ]]; then
+                log_header "Esecuzione Test Unitari Rust (Host Daemon)"
+            else
+                log_header "Running Rust Unit Tests (Host Daemon)"
+            fi
+            cd "$DAEMON_DIR"
+            "$cargo_bin" test
+            ;;
+        flutter)
+            setup_android_env
+            flutter_bin=$(get_flutter_bin) || {
+                [[ "$LOCALE" == "it" ]] && log_error "Flutter non trovato" || log_error "Flutter not found";
+                exit 1;
+            }
+            if [[ "$LOCALE" == "it" ]]; then
+                log_header "Esecuzione Test Unitari Flutter (Mobile App)"
+            else
+                log_header "Running Flutter Unit Tests (Mobile App)"
+            fi
+            cd "$MOBILE_DIR"
+            "$flutter_bin" test
+            ;;
+        all)
+            if [[ "$LOCALE" == "it" ]]; then
+                log_header "Esecuzione Test Completi (Rust + Flutter)"
+            else
+                log_header "Running Complete Test Suite (Rust + Flutter)"
+            fi
+            if cargo_bin=$(get_cargo_bin 2>/dev/null); then
+                echo -e "\n${BOLD}[Rust Tests]${RESET}"
+                (cd "$DAEMON_DIR" && "$cargo_bin" test)
+            fi
+            if flutter_bin=$(get_flutter_bin 2>/dev/null); then
+                echo -e "\n${BOLD}[Flutter Tests]${RESET}"
+                setup_android_env
+                (cd "$MOBILE_DIR" && "$flutter_bin" test)
+            fi
+            if [[ "$LOCALE" == "it" ]]; then
+                log_success "Tutti i test completati con successo!"
+            else
+                log_success "All tests passed successfully!"
+            fi
+            ;;
+        *)
+            if [[ "$LOCALE" == "it" ]]; then
+                log_error "Target di test sconosciuto: '$target'. Usa 'rust', 'flutter' o 'all'."
+            else
+                log_error "Unknown test target: '$target'. Use 'rust', 'flutter' or 'all'."
+            fi
+            exit 1
+            ;;
+    esac
+}
+
+cmd_bump() {
+    "$PROJECT_ROOT/scripts/bump-version.sh" "$@"
+}
+
+# ------------------------------------------------------------------------------
+# Devices & APK Installation (ADB)
+# ------------------------------------------------------------------------------
+cmd_devices() {
+    if [[ "$LOCALE" == "it" ]]; then
+        log_header "Dispositivi Rilevati (ADB / Flutter)"
+    else
+        log_header "Detected Devices (ADB / Flutter)"
+    fi
+    setup_android_env
+    local adb_bin
+    if adb_bin=$(get_adb_bin 2>/dev/null); then
+        if [[ "$LOCALE" == "it" ]]; then
+            echo -e "${BOLD}Dispositivi Android collegati (ADB):${RESET}"
+            "$adb_bin" devices -l 2>&1 || log_warning "Impossibile interrogare il server ADB."
+        else
+            echo -e "${BOLD}Connected Android Devices (ADB):${RESET}"
+            "$adb_bin" devices -l 2>&1 || log_warning "Could not query ADB server."
+        fi
+    else
+        if [[ "$LOCALE" == "it" ]]; then
+            log_warning "Comando 'adb' non trovato per il rilevamento hardware diretto."
+        else
+            log_warning "Command 'adb' not found for direct hardware probing."
+        fi
+    fi
+
+    local flutter_bin
+    if flutter_bin=$(get_flutter_bin 2>/dev/null); then
+        if [[ "$LOCALE" == "it" ]]; then
+            echo -e "\n${BOLD}Dispositivi rilevati da Flutter:${RESET}"
+            setup_android_env
+            "$flutter_bin" devices 2>&1 || log_warning "Impossibile interrogare i dispositivi da Flutter."
+        else
+            echo -e "\n${BOLD}Devices detected by Flutter:${RESET}"
+            setup_android_env
+            "$flutter_bin" devices 2>&1 || log_warning "Could not query devices from Flutter."
+        fi
+    fi
+}
+
+cmd_install_apk() {
+    local mode="${1:-release}"
+    local adb_bin
+    if ! adb_bin=$(get_adb_bin); then
+        if [[ "$LOCALE" == "it" ]]; then
+            log_error "Strumento 'adb' non trovato. Verifica la configurazione dell'Android SDK."
+        else
+            log_error "Tool 'adb' not found. Verify your Android SDK configuration."
+        fi
+        exit 1
+    fi
+
+    if [[ "$LOCALE" == "it" ]]; then
+        log_header "Installazione APK su Dispositivo Android via USB/ADB"
+    else
+        log_header "Installing APK on Android Device via USB/ADB"
+    fi
+    local apk_path=""
+    if [[ "$mode" == "release" || "$mode" == "production" ]]; then
+        apk_path="$MOBILE_DIR/build/app/outputs/flutter-apk/app-release.apk"
+        if [[ ! -f "$apk_path" ]]; then
+            apk_path="$MOBILE_DIR/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk"
+        fi
+    else
+        apk_path="$MOBILE_DIR/build/app/outputs/flutter-apk/app-debug.apk"
+    fi
+
+    if [[ ! -f "$apk_path" ]]; then
+        if [[ "$LOCALE" == "it" ]]; then
+            log_warning "APK non trovato in $apk_path. Compilazione in corso..."
+        else
+            log_warning "APK not found at $apk_path. Compiling now..."
+        fi
+        build_flutter_android "$mode"
+    fi
+
+    if [[ ! -f "$apk_path" ]]; then
+        if [[ "$LOCALE" == "it" ]]; then
+            log_error "Impossibile individuare il pacchetto APK da installare."
+        else
+            log_error "Could not locate APK package to install."
+        fi
+        exit 1
+    fi
+
+    if [[ "$LOCALE" == "it" ]]; then
+        log_info "Installazione in corso di: $apk_path"
+        "$adb_bin" install -r "$apk_path"
+        log_success "Installazione completata con successo sullo smartphone collegato!"
+    else
+        log_info "Installing: $apk_path"
+        "$adb_bin" install -r "$apk_path"
+        log_success "Installation completed successfully on connected smartphone!"
+    fi
+}
+
+# ------------------------------------------------------------------------------
+# System Diagnostics (Doctor / Check)
+# ------------------------------------------------------------------------------
+cmd_doctor() {
+    if [[ "$LOCALE" == "it" ]]; then
+        log_header "OneControl Doctor - Diagnostica e Requisiti di Sistema"
+    else
+        log_header "OneControl Doctor - System Diagnostics & Requirements"
+    fi
+    local issues=0
+
+    # 1. Operating System
+    if [[ "$LOCALE" == "it" ]]; then
+        echo -e "${BOLD}[Sistema Operativo]${RESET}"
+        echo -e "  • Kernel:    $(uname -s) $(uname -r) ($(uname -m))"
+        echo -e "  • Utente:    $USER (UID: $(id -u))"
+    else
+        echo -e "${BOLD}[Operating System]${RESET}"
+        echo -e "  • Kernel:    $(uname -s) $(uname -r) ($(uname -m))"
+        echo -e "  • User:      $USER (UID: $(id -u))"
+    fi
+
+    # 2. Rust & Cargo
+    if [[ "$LOCALE" == "it" ]]; then
+        echo -e "\n${BOLD}[Toolchain Rust]${RESET}"
+    else
+        echo -e "\n${BOLD}[Rust Toolchain]${RESET}"
+    fi
+    local cargo_bin
+    if cargo_bin=$(get_cargo_bin 2>/dev/null); then
+        local cargo_ver
+        cargo_ver=$("$cargo_bin" --version)
+        echo -e "  • Cargo:     ${GREEN}$( [[ "$LOCALE" == "it" ]] && echo "trovato" || echo "found" )${RESET} ($cargo_ver)"
+    else
+        echo -e "  • Cargo:     ${RED}$( [[ "$LOCALE" == "it" ]] && echo "NON trovato" || echo "NOT found" )${RESET}"
+        ((issues++))
+    fi
+
+    local rustc_bin
+    if rustc_bin=$(get_rustc_bin 2>/dev/null); then
+        local rustc_ver
+        rustc_ver=$("$rustc_bin" --version)
+        echo -e "  • Rustc:     ${GREEN}$( [[ "$LOCALE" == "it" ]] && echo "trovato" || echo "found" )${RESET} ($rustc_ver)"
+    else
+        echo -e "  • Rustc:     ${RED}$( [[ "$LOCALE" == "it" ]] && echo "NON trovato" || echo "NOT found" )${RESET}"
+        ((issues++))
+    fi
+
+    # 3. Flutter & Android SDK
+    if [[ "$LOCALE" == "it" ]]; then
+        echo -e "\n${BOLD}[Ambiente Mobile (Flutter / Android)]${RESET}"
+    else
+        echo -e "\n${BOLD}[Mobile Environment (Flutter / Android)]${RESET}"
+    fi
+    setup_android_env
+    local flutter_bin
+    if flutter_bin=$(get_flutter_bin 2>/dev/null); then
+        local flutter_ver
+        flutter_ver=$("$flutter_bin" --version 2>/dev/null | head -n 1 || echo "Flutter ($flutter_bin)")
+        echo -e "  • Flutter:   ${GREEN}$( [[ "$LOCALE" == "it" ]] && echo "trovato" || echo "found" )${RESET} ($flutter_ver)"
+    else
+        local prop_file="$MOBILE_DIR/android/local.properties"
+        local sdk_path=""
+        if [[ -f "$prop_file" ]]; then
+            sdk_path=$(grep -E '^flutter.sdk=' "$prop_file" 2>/dev/null | cut -d'=' -f2- | tr -d '\r')
+        fi
+        if [[ -n "$sdk_path" ]]; then
+            echo -e "  • Flutter:   ${YELLOW}$( [[ "$LOCALE" == "it" ]] && echo "configurato in local.properties ($sdk_path)" || echo "configured in local.properties ($sdk_path)" )${RESET}"
+        else
+            echo -e "  • Flutter:   ${YELLOW}$( [[ "$LOCALE" == "it" ]] && echo "NON trovato nel PATH corrente" || echo "NOT found in current PATH" )${RESET}"
+        fi
+    fi
+
+    local adb_bin
+    if adb_bin=$(get_adb_bin 2>/dev/null); then
+        local adb_ver
+        adb_ver=$("$adb_bin" --version 2>/dev/null | head -n 1 || echo "ADB")
+        echo -e "  • ADB:       ${GREEN}$( [[ "$LOCALE" == "it" ]] && echo "trovato" || echo "found" )${RESET} ($adb_ver)"
+    else
+        echo -e "  • ADB:       ${YELLOW}$( [[ "$LOCALE" == "it" ]] && echo "NON trovato nel PATH" || echo "NOT found in PATH" )${RESET}"
+    fi
+
+    # 4. Kernel /dev/uinput
+    if [[ "$LOCALE" == "it" ]]; then
+        echo -e "\n${BOLD}[Driver Dispositivi Kernel (/dev/uinput)]${RESET}"
+    else
+        echo -e "\n${BOLD}[Kernel Device Driver (/dev/uinput)]${RESET}"
+    fi
+    if [[ -e /dev/uinput ]]; then
+        echo -e "  • Device node:      ${GREEN}$( [[ "$LOCALE" == "it" ]] && echo "/dev/uinput presente" || echo "/dev/uinput present" )${RESET}"
+    else
+        echo -e "  • Device node:      ${RED}$( [[ "$LOCALE" == "it" ]] && echo "/dev/uinput NON presente (esegui: sudo modprobe uinput)" || echo "/dev/uinput NOT present (run: sudo modprobe uinput)" )${RESET}"
+        ((issues++))
+    fi
+
+    if [[ -r /dev/uinput && -w /dev/uinput ]]; then
+        echo -e "  • User permissions: ${GREEN}$( [[ "$LOCALE" == "it" ]] && echo "OK (lettura/scrittura concessa per $USER)" || echo "OK (read and write allowed for $USER)" )${RESET}"
+    else
+        echo -e "  • User permissions: ${RED}$( [[ "$LOCALE" == "it" ]] && echo "MANCANTI (l'utente $USER non ha permessi rw su /dev/uinput)" || echo "MISSING (user $USER does not have rw permissions on /dev/uinput)" )${RESET}"
+        echo -e "    💡 $( [[ "$LOCALE" == "it" ]] && echo "Risolvi subito con:" || echo "Fix immediately with:" ) ${CYAN}./onecontrol setup uinput${RESET}"
+        ((issues++))
+    fi
+
+    # 5. Desktop Notifications
+    if [[ "$LOCALE" == "it" ]]; then
+        echo -e "\n${BOLD}[Notifiche Desktop (Server di notifica)]${RESET}"
+    else
+        echo -e "\n${BOLD}[Desktop Notifications (Notification Daemon)]${RESET}"
+    fi
+    if command -v notify-send &>/dev/null; then
+        echo -e "  • notify-send:      ${GREEN}$( [[ "$LOCALE" == "it" ]] && echo "presente" || echo "present" )${RESET}"
+    else
+        echo -e "  • notify-send:      ${YELLOW}$( [[ "$LOCALE" == "it" ]] && echo "non trovato (PIN visibile nei log/terminale)" || echo "not found (PIN will only be visible in daemon logs/terminal)" )${RESET}"
+    fi
+
+    # 6. Firewall & Port 53842
+    if [[ "$LOCALE" == "it" ]]; then
+        echo -e "\n${BOLD}[Rete e Firewall (Porta $DEFAULT_PORT TCP/UDP)]${RESET}"
+    else
+        echo -e "\n${BOLD}[Network & Firewall (Port $DEFAULT_PORT TCP/UDP)]${RESET}"
+    fi
+    local fw_found=false
+    if command -v firewall-cmd &>/dev/null; then
+        fw_found=true
+        local tcp_ok udp_ok
+        tcp_ok=$(sudo -n firewall-cmd --query-port="$DEFAULT_PORT/tcp" 2>/dev/null || firewall-cmd --query-port="$DEFAULT_PORT/tcp" 2>/dev/null || echo "no")
+        udp_ok=$(sudo -n firewall-cmd --query-port="$DEFAULT_PORT/udp" 2>/dev/null || firewall-cmd --query-port="$DEFAULT_PORT/udp" 2>/dev/null || echo "no")
+        if [[ "$tcp_ok" == "yes" && "$udp_ok" == "yes" ]]; then
+            echo -e "  • firewalld: ${GREEN}$( [[ "$LOCALE" == "it" ]] && echo "Porta $DEFAULT_PORT TCP/UDP aperta" || echo "Port $DEFAULT_PORT TCP/UDP open" )${RESET}"
+        else
+            echo -e "  • firewalld: ${YELLOW}$( [[ "$LOCALE" == "it" ]] && echo "Porta $DEFAULT_PORT non aperta (TCP: $tcp_ok, UDP: $udp_ok)" || echo "Port $DEFAULT_PORT not open (TCP: $tcp_ok, UDP: $udp_ok)" )${RESET}"
+            echo -e "    💡 $( [[ "$LOCALE" == "it" ]] && echo "Configura automaticamente con:" || echo "Configure automatically with:" ) ${CYAN}./onecontrol setup firewall${RESET}"
+        fi
+    elif command -v ufw &>/dev/null; then
+        fw_found=true
+        if sudo -n ufw status 2>/dev/null | grep -q "$DEFAULT_PORT"; then
+            echo -e "  • UFW:       ${GREEN}$( [[ "$LOCALE" == "it" ]] && echo "Regole per porta $DEFAULT_PORT trovate" || echo "Rules for port $DEFAULT_PORT found" )${RESET}"
+        else
+            echo -e "  • UFW:       ${YELLOW}$( [[ "$LOCALE" == "it" ]] && echo "Nessuna regola rilevata per la porta $DEFAULT_PORT" || echo "No rule detected for port $DEFAULT_PORT" )${RESET}"
+            echo -e "    💡 $( [[ "$LOCALE" == "it" ]] && echo "Configura automaticamente con:" || echo "Configure automatically with:" ) ${CYAN}./onecontrol setup firewall${RESET}"
+        fi
+    fi
+    if [[ "$fw_found" == false ]]; then
+        if [[ "$LOCALE" == "it" ]]; then
+            echo -e "  • Firewall:  Nessun gestore firewalld/ufw rilevato o attivo."
+        else
+            echo -e "  • Firewall:  No firewalld/ufw service detected or active."
+        fi
+    fi
+
+    # 7. Systemd Service
+    if [[ "$LOCALE" == "it" ]]; then
+        echo -e "\n${BOLD}[Servizio Systemd Utente]${RESET}"
+        local installed_service="$SYSTEMD_USER_DIR/onecontrol.service"
+        local installed_bin="$BIN_INSTALL_DIR/onecontrol-daemon"
+        echo -e "  • Binario installato: $( [[ -f "$installed_bin" ]] && echo -e "${GREEN}Sì ($installed_bin)${RESET}" || echo -e "${YELLOW}No${RESET}" )"
+        echo -e "  • Unit installata:    $( [[ -f "$installed_service" ]] && echo -e "${GREEN}Sì ($installed_service)${RESET}" || echo -e "${YELLOW}No${RESET}" )"
+    else
+        echo -e "\n${BOLD}[User Systemd Service]${RESET}"
+        local installed_service="$SYSTEMD_USER_DIR/onecontrol.service"
+        local installed_bin="$BIN_INSTALL_DIR/onecontrol-daemon"
+        echo -e "  • Binary installed: $( [[ -f "$installed_bin" ]] && echo -e "${GREEN}Yes ($installed_bin)${RESET}" || echo -e "${YELLOW}No${RESET}" )"
+        echo -e "  • Unit installed:   $( [[ -f "$installed_service" ]] && echo -e "${GREEN}Yes ($installed_service)${RESET}" || echo -e "${YELLOW}No${RESET}" )"
+    fi
+
+    echo ""
+    if [[ $issues -eq 0 ]]; then
+        if [[ "$LOCALE" == "it" ]]; then
+            log_success "Diagnostica superata: l'ambiente è pronto per eseguire OneControl!"
+        else
+            log_success "Diagnostics passed: your environment is ready to run OneControl!"
+        fi
+    else
+        if [[ "$LOCALE" == "it" ]]; then
+            log_warning "Diagnostica completata con $issues avviso/i o problemi rilevati."
+        else
+            log_warning "Diagnostics completed with $issues warning(s) or issue(s) detected."
+        fi
+    fi
+}
+
+# ------------------------------------------------------------------------------
+# Automated Setup (Setup)
+# ------------------------------------------------------------------------------
+cmd_setup() {
+    local target="${1:-}"
+    shift || true
+
+    case "$target" in
+        uinput)
+            if [[ "$LOCALE" == "it" ]]; then
+                log_header "Configurazione Permessi per /dev/uinput"
+                log_info "OneControl necessita di accedere a /dev/uinput per simulare mouse e tastiera."
+            else
+                log_header "Configuring Permissions for /dev/uinput"
+                log_info "OneControl requires access to /dev/uinput to simulate virtual mouse and keyboard."
+            fi
+
+            local choice="${1:-}"
+            if [[ -z "$choice" ]]; then
+                if [[ -t 0 ]]; then
+                    echo ""
+                    if [[ "$LOCALE" == "it" ]]; then
+                        echo "1) Applicare permesso immediato ACL (sudo setfacl -m u:\$USER:rw /dev/uinput)"
+                        echo "2) Installare regola udev permanente (/etc/udev/rules.d/99-uinput.rules)"
+                        echo "3) Applica ENTRAMBI (Consigliato)"
+                        echo ""
+                        read -r -p "Seleziona opzione [1-3, default 3]: " choice
+                    else
+                        echo "1) Apply immediate ACL permission (sudo setfacl -m u:\$USER:rw /dev/uinput)"
+                        echo "2) Install persistent udev rule (/etc/udev/rules.d/99-uinput.rules)"
+                        echo "3) Apply BOTH (Recommended)"
+                        echo ""
+                        read -r -p "Select option [1-3, default 3]: " choice
+                    fi
+                    choice="${choice:-3}"
+                else
+                    choice="3"
+                fi
+            fi
+
+            case "$choice" in
+                1|acl)
+                    if [[ "$LOCALE" == "it" ]]; then
+                        log_info "Esecuzione: sudo setfacl -m u:$USER:rw /dev/uinput"
+                        sudo setfacl -m "u:$USER:rw" /dev/uinput
+                        log_success "Permessi ACL impostati con successo!"
+                    else
+                        log_info "Running: sudo setfacl -m u:$USER:rw /dev/uinput"
+                        sudo setfacl -m "u:$USER:rw" /dev/uinput
+                        log_success "ACL permissions set successfully!"
+                    fi
+                    ;;
+                2|udev)
+                    if [[ "$LOCALE" == "it" ]]; then
+                        log_info "Creazione regola udev..."
+                        echo 'KERNEL=="uinput", MODE="0660", GROUP="input", OPTIONS+="static_node=uinput"' | sudo tee /etc/udev/rules.d/99-uinput.rules
+                        sudo usermod -aG input "$USER"
+                        sudo udevadm control --reload-rules && sudo udevadm trigger
+                        log_success "Regola udev creata. (Nota: per il gruppo input potrebbe servire un re-login)."
+                    else
+                        log_info "Creating udev rule..."
+                        echo 'KERNEL=="uinput", MODE="0660", GROUP="input", OPTIONS+="static_node=uinput"' | sudo tee /etc/udev/rules.d/99-uinput.rules
+                        sudo usermod -aG input "$USER"
+                        sudo udevadm control --reload-rules && sudo udevadm trigger
+                        log_success "Udev rule created. (Note: group changes may require a re-login to take effect)."
+                    fi
+                    ;;
+                3|both|all)
+                    if [[ "$LOCALE" == "it" ]]; then
+                        log_info "Creazione regola udev permanente e ACL immediata..."
+                        echo 'KERNEL=="uinput", MODE="0660", GROUP="input", OPTIONS+="static_node=uinput"' | sudo tee /etc/udev/rules.d/99-uinput.rules
+                        sudo usermod -aG input "$USER" 2>/dev/null || true
+                        sudo udevadm control --reload-rules && sudo udevadm trigger
+                        sudo setfacl -m "u:$USER:rw" /dev/uinput 2>/dev/null || true
+                        log_success "Configurazione permessi completata con successo!"
+                    else
+                        log_info "Creating persistent udev rule and immediate ACL..."
+                        echo 'KERNEL=="uinput", MODE="0660", GROUP="input", OPTIONS+="static_node=uinput"' | sudo tee /etc/udev/rules.d/99-uinput.rules
+                        sudo usermod -aG input "$USER" 2>/dev/null || true
+                        sudo udevadm control --reload-rules && sudo udevadm trigger
+                        sudo setfacl -m "u:$USER:rw" /dev/uinput 2>/dev/null || true
+                        log_success "Permission configuration completed successfully!"
+                    fi
+                    ;;
+                *)
+                    if [[ "$LOCALE" == "it" ]]; then
+                        log_error "Opzione non valida: '$choice'."
+                    else
+                        log_error "Invalid option: '$choice'."
+                    fi
+                    exit 1
+                    ;;
+            esac
+            ;;
+        firewall)
+            if [[ "$LOCALE" == "it" ]]; then
+                log_header "Configurazione Firewall (Porta $DEFAULT_PORT TCP/UDP)"
+            else
+                log_header "Configuring Firewall (Port $DEFAULT_PORT TCP/UDP)"
+            fi
+            if command -v firewall-cmd &>/dev/null; then
+                if [[ "$LOCALE" == "it" ]]; then
+                    log_info "Configurazione con firewalld..."
+                    sudo firewall-cmd --permanent --add-port="$DEFAULT_PORT/tcp"
+                    sudo firewall-cmd --permanent --add-port="$DEFAULT_PORT/udp"
+                    sudo firewall-cmd --reload
+                    log_success "Porte aperte con successo su firewalld!"
+                else
+                    log_info "Configuring with firewalld..."
+                    sudo firewall-cmd --permanent --add-port="$DEFAULT_PORT/tcp"
+                    sudo firewall-cmd --permanent --add-port="$DEFAULT_PORT/udp"
+                    sudo firewall-cmd --reload
+                    log_success "Ports opened successfully in firewalld!"
+                fi
+            elif command -v ufw &>/dev/null; then
+                if [[ "$LOCALE" == "it" ]]; then
+                    log_info "Configurazione con UFW..."
+                    sudo ufw allow "$DEFAULT_PORT/tcp"
+                    sudo ufw allow "$DEFAULT_PORT/udp"
+                    log_success "Porte aperte con successo su UFW!"
+                else
+                    log_info "Configuring with UFW..."
+                    sudo ufw allow "$DEFAULT_PORT/tcp"
+                    sudo ufw allow "$DEFAULT_PORT/udp"
+                    log_success "Ports opened successfully in UFW!"
+                fi
+            else
+                if [[ "$LOCALE" == "it" ]]; then
+                    log_warning "Nessun gestore firewall automatico supportato rilevato (firewalld/ufw)."
+                    log_info "Assicurati manualmente che la porta $DEFAULT_PORT TCP e UDP sia aperta verso la LAN."
+                else
+                    log_warning "No supported automated firewall manager detected (firewalld/ufw)."
+                    log_info "Manually ensure that port $DEFAULT_PORT TCP and UDP is open to your local LAN."
+                fi
+            fi
+            ;;
+        *)
+            if [[ "$LOCALE" == "it" ]]; then
+                log_error "Argomento setup non valido: '$target'. Usa 'uinput' o 'firewall'."
+            else
+                log_error "Invalid setup argument: '$target'. Use 'uinput' or 'firewall'."
+            fi
+            exit 1
+            ;;
+    esac
+}
+
+# ------------------------------------------------------------------------------
+# Build and Cache Cleaning (Clean)
+# ------------------------------------------------------------------------------
+cmd_clean() {
+    local target="${1:-all}"
+    if [[ "$LOCALE" == "it" ]]; then
+        log_header "Pulizia Build e Cache ($target)"
+    else
+        log_header "Cleaning Build Artifacts and Cache ($target)"
+    fi
+
+    case "$target" in
+        rust)
+            local cargo_bin
+            cargo_bin=$(get_cargo_bin) || {
+                [[ "$LOCALE" == "it" ]] && log_error "Cargo non trovato" || log_error "Cargo not found";
+                exit 1;
+            }
+            (cd "$DAEMON_DIR" && "$cargo_bin" clean)
+            if [[ "$LOCALE" == "it" ]]; then
+                log_success "Cartella target/ di Rust pulita con successo."
+            else
+                log_success "Rust target/ directory cleaned successfully."
+            fi
+            ;;
+        flutter)
+            setup_android_env
+            local flutter_bin
+            flutter_bin=$(get_flutter_bin) || {
+                [[ "$LOCALE" == "it" ]] && log_error "Flutter non trovato" || log_error "Flutter not found";
+                exit 1;
+            }
+            (cd "$MOBILE_DIR" && "$flutter_bin" clean)
+            if [[ "$LOCALE" == "it" ]]; then
+                log_success "Cartella build/ di Flutter pulita con successo."
+            else
+                log_success "Flutter build/ directory cleaned successfully."
+            fi
+            ;;
+        all)
+            if cargo_bin=$(get_cargo_bin 2>/dev/null); then
+                (cd "$DAEMON_DIR" && "$cargo_bin" clean)
+            fi
+            if flutter_bin=$(get_flutter_bin 2>/dev/null); then
+                setup_android_env
+                (cd "$MOBILE_DIR" && "$flutter_bin" clean)
+            fi
+            if [[ "$LOCALE" == "it" ]]; then
+                log_success "Tutte le directory di build sono state pulite."
+            else
+                log_success "All build directories cleaned successfully."
+            fi
+            ;;
+        *)
+            if [[ "$LOCALE" == "it" ]]; then
+                log_error "Target clean non valido: '$target'. Usa 'rust', 'flutter' o 'all'."
+            else
+                log_error "Invalid clean target: '$target'. Use 'rust', 'flutter' or 'all'."
+            fi
+            exit 1
+            ;;
+    esac
+}
+
+# ------------------------------------------------------------------------------
+# Help Menu
+# ------------------------------------------------------------------------------
+cmd_help() {
+    if [[ "$LOCALE" == "it" ]]; then
+        cat << EOF
+${BOLD}${CYAN}OneControl CLI Management Tool${RESET}
+Strumento unificato per compilazione, installazione, gestione del servizio e deploy.
+(Lingua rilevata automaticamente: ${GREEN}Italiano${RESET})
+
+${BOLD}UTILIZZO:${RESET}
+  ./onecontrol <comando> [opzioni]
+
+${BOLD}COMANDI PRINCIPALI:${RESET}
+  ${GREEN}build rust production${RESET}            Compila il demone host Rust in modalità release ottimizzata
+  ${GREEN}build rust debug${RESET}                 Compila il demone host Rust in modalità debug
+  ${GREEN}build flutter android production${RESET} Compila l'APK Android release universale
+  ${GREEN}build flutter android debug${RESET}      Compila l'APK Android in modalità debug
+  ${GREEN}build flutter android split${RESET}      Compila gli APK suddivisi per architettura (ARM64, v7, x86)
+  ${GREEN}build all [production|debug]${RESET}     Compila sia Rust che l'app Flutter
+
+  ${GREEN}install${RESET}                          Compila il Rust in release, copia in ~/.local/bin/
+                                   e installa/aggiorna e avvia il servizio systemd utente
+  ${GREEN}uninstall${RESET}                        Disabilita, ferma e rimuove il servizio e l'eseguibile
+
+${BOLD}GESTIONE SERVIZIO SYSTEMD:${RESET}
+  ${CYAN}status${RESET}                           Mostra lo stato del servizio, processo e porte in ascolto
+  ${CYAN}start${RESET}                            Avvia il servizio systemd utente
+  ${CYAN}stop${RESET}                             Ferma il servizio systemd utente
+  ${CYAN}restart${RESET}                          Riavvia il servizio systemd utente
+  ${CYAN}logs [-f|--follow] [-n linee]${RESET}    Mostra i log del demone con journalctl (es. -f per live)
+
+${BOLD}ESECUZIONE LOCALE & SVILUPPO:${RESET}
+  ${YELLOW}run rust [debug|production]${RESET}      Esegue il demone Rust direttamente nel terminale corrente
+  ${YELLOW}run flutter [android]${RESET}            Avvia l'app Flutter su smartphone o emulatore collegato
+  ${YELLOW}test [rust|flutter|all]${RESET}          Esegue i test automatici del progetto
+  ${YELLOW}bump [patch|minor|major|custom]${RESET}  Incrementa e allinea la versione del progetto
+
+${BOLD}DEPLOY SMARTPHONE (ANDROID/ADB):${RESET}
+  ${MAGENTA}devices${RESET}                          Elenca i dispositivi Android rilevati (ADB e Flutter)
+  ${MAGENTA}install-apk [release|debug]${RESET}      Installa l'APK generato sullo smartphone via cavo USB (ADB)
+
+${BOLD}DIAGNOSTICA & CONFIGURAZIONE:${RESET}
+  ${BLUE}doctor${RESET} | ${BLUE}check${RESET}                     Esegue un controllo completo dei prerequisiti di sistema
+                                   (Rust, Flutter, uinput, permessi utente, firewall)
+  ${BLUE}setup uinput${RESET}                      Configura automaticamente i permessi per /dev/uinput
+  ${BLUE}setup firewall${RESET}                    Apre le porte 53842 TCP/UDP con firewalld o UFW
+  ${BLUE}clean [rust|flutter|all]${RESET}          Pulisce le cartelle dei file compilati
+
+${BOLD}ESEMPI DI UTILIZZO:${RESET}
+  ./onecontrol build rust production
+  ./onecontrol install
+  ./onecontrol status
+  ./onecontrol logs -f
+  ./onecontrol build flutter android production
+  ./onecontrol install-apk release
+  ./onecontrol doctor
+EOF
+    else
+        cat << EOF
+${BOLD}${CYAN}OneControl CLI Management Tool${RESET}
+Unified tool for compilation, installation, service management, and deployment.
+(Detected Language: ${GREEN}English${RESET})
+
+${BOLD}USAGE:${RESET}
+  ./onecontrol <command> [options]
+
+${BOLD}MAIN COMMANDS:${RESET}
+  ${GREEN}build rust production${RESET}            Compile Rust host daemon in optimized release mode
+  ${GREEN}build rust debug${RESET}                 Compile Rust host daemon in debug mode
+  ${GREEN}build flutter android production${RESET} Build universal release Android APK
+  ${GREEN}build flutter android debug${RESET}      Build debug Android APK
+  ${GREEN}build flutter android split${RESET}      Build architecture-split APKs (ARM64, v7, x86)
+  ${GREEN}build all [production|debug]${RESET}     Compile both Rust daemon and Flutter app
+
+  ${GREEN}install${RESET}                          Build Rust release, copy to ~/.local/bin/
+                                   and install/update & start user systemd service
+  ${GREEN}uninstall${RESET}                        Disable, stop, and remove service and binary
+
+${BOLD}SYSTEMD SERVICE MANAGEMENT:${RESET}
+  ${CYAN}status${RESET}                           Show service status, active process, and listening ports
+  ${CYAN}start${RESET}                            Start user systemd service
+  ${CYAN}stop${RESET}                             Stop user systemd service
+  ${CYAN}restart${RESET}                          Restart user systemd service
+  ${CYAN}logs [-f|--follow] [-n lines]${RESET}    View daemon logs via journalctl (-f for live stream)
+
+${BOLD}LOCAL EXECUTION & DEVELOPMENT:${RESET}
+  ${YELLOW}run rust [debug|production]${RESET}      Run Rust daemon directly in current terminal
+  ${YELLOW}run flutter [android]${RESET}            Launch Flutter app on connected phone or emulator
+  ${YELLOW}test [rust|flutter|all]${RESET}          Run automated project tests
+  ${YELLOW}bump [patch|minor|major|custom]${RESET}  Bump and harmonize project versions
+
+${BOLD}SMARTPHONE DEPLOYMENT (ANDROID/ADB):${RESET}
+  ${MAGENTA}devices${RESET}                          List detected Android devices (ADB and Flutter)
+  ${MAGENTA}install-apk [release|debug]${RESET}      Install generated APK on smartphone via USB (ADB)
+
+${BOLD}DIAGNOSTICS & SETUP:${RESET}
+  ${BLUE}doctor${RESET} | ${BLUE}check${RESET}                     Perform complete system prerequisite check
+                                   (Rust, Flutter, uinput, user permissions, firewall)
+  ${BLUE}setup uinput${RESET}                      Configure permissions for /dev/uinput
+  ${BLUE}setup firewall${RESET}                    Open ports 53842 TCP/UDP with firewalld or UFW
+  ${BLUE}clean [rust|flutter|all]${RESET}          Clean build output directories
+
+${BOLD}USAGE EXAMPLES:${RESET}
+  ./onecontrol build rust production
+  ./onecontrol install
+  ./onecontrol status
+  ./onecontrol logs -f
+  ./onecontrol build flutter android production
+  ./onecontrol install-apk release
+  ./onecontrol doctor
+EOF
+    fi
+}
+
+# ------------------------------------------------------------------------------
+# Main Entry Point
+# ------------------------------------------------------------------------------
+main() {
+    if [[ $# -eq 0 ]]; then
+        cmd_help
+        exit 0
+    fi
+
+    local action="$1"
+    shift
+
+    case "$action" in
+        build)
+            cmd_build "$@"
+            ;;
+        install)
+            cmd_install "$@"
+            ;;
+        uninstall)
+            cmd_uninstall "$@"
+            ;;
+        status)
+            cmd_status "$@"
+            ;;
+        start)
+            cmd_start "$@"
+            ;;
+        stop)
+            cmd_stop "$@"
+            ;;
+        restart)
+            cmd_restart "$@"
+            ;;
+        logs)
+            cmd_logs "$@"
+            ;;
+        run)
+            cmd_run "$@"
+            ;;
+        test)
+            cmd_test "$@"
+            ;;
+        bump|bump-version)
+            cmd_bump "$@"
+            ;;
+        devices)
+            cmd_devices "$@"
+            ;;
+        install-apk|apk-install)
+            cmd_install_apk "$@"
+            ;;
+        doctor|check)
+            cmd_doctor "$@"
+            ;;
+        setup)
+            cmd_setup "$@"
+            ;;
+        setup-uinput)
+            cmd_setup "uinput" "$@"
+            ;;
+        setup-firewall)
+            cmd_setup "firewall" "$@"
+            ;;
+        clean)
+            cmd_clean "$@"
+            ;;
+        help|--help|-h)
+            cmd_help
+            ;;
+        *)
+            if [[ "$LOCALE" == "it" ]]; then
+                log_error "Comando sconosciuto: '$action'"
+            else
+                log_error "Unknown command: '$action'"
+            fi
+            echo ""
+            cmd_help
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"

@@ -1,0 +1,7 @@
+flutter/ephemeral/
+
+# CMake / IDE user files
+CMakeLists.txt.user
+compile_commands.json
+.ninja_deps
+.ninja_log
