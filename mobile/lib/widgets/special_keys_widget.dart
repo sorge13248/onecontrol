@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+
 import '../l10n/app_localizations.dart';
 import '../services/connection_service.dart';
 
@@ -22,7 +23,11 @@ class _SpecialKeysWidgetState extends State<SpecialKeysWidget> {
   // FN row visibility
   bool _showFnRow = false;
 
-  void _toggleModifier(String key, bool currentVal, ValueChanged<bool> updater) {
+  void _toggleModifier(
+    String key,
+    bool currentVal,
+    ValueChanged<bool> updater,
+  ) {
     HapticFeedback.lightImpact();
     final newVal = !currentVal;
     updater(newVal);
@@ -51,8 +56,12 @@ class _SpecialKeysWidgetState extends State<SpecialKeysWidget> {
             decoration: BoxDecoration(
               color: theme.colorScheme.surfaceContainerHighest,
               border: Border(
-                top: BorderSide(color: theme.colorScheme.outlineVariant.withAlpha(50)),
-                bottom: BorderSide(color: theme.colorScheme.outlineVariant.withAlpha(50)),
+                top: BorderSide(
+                  color: theme.colorScheme.outlineVariant.withAlpha(50),
+                ),
+                bottom: BorderSide(
+                  color: theme.colorScheme.outlineVariant.withAlpha(50),
+                ),
               ),
             ),
             child: Column(
@@ -68,11 +77,17 @@ class _SpecialKeysWidgetState extends State<SpecialKeysWidget> {
                         child: OutlinedButton(
                           onPressed: () => _sendKeyPress(fKey),
                           style: OutlinedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 8,
+                            ),
                             minimumSize: const Size(42, 36),
                             visualDensity: VisualDensity.compact,
                           ),
-                          child: Text(fKey, style: const TextStyle(fontWeight: FontWeight.bold)),
+                          child: Text(
+                            fKey,
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          ),
                         ),
                       );
                     }),
@@ -83,10 +98,26 @@ class _SpecialKeysWidgetState extends State<SpecialKeysWidget> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
-                    _buildIconKey(Icons.volume_mute, 'MUTE', tooltip: l10n.mute),
-                    _buildIconKey(Icons.volume_down, 'VOLDOWN', tooltip: l10n.volumeDown),
-                    _buildIconKey(Icons.volume_up, 'VOLUP', tooltip: l10n.volumeUp),
-                    _buildIconKey(Icons.play_arrow, 'PLAYPAUSE', tooltip: l10n.playPause),
+                    _buildIconKey(
+                      Icons.volume_mute,
+                      'MUTE',
+                      tooltip: l10n.mute,
+                    ),
+                    _buildIconKey(
+                      Icons.volume_down,
+                      'VOLDOWN',
+                      tooltip: l10n.volumeDown,
+                    ),
+                    _buildIconKey(
+                      Icons.volume_up,
+                      'VOLUP',
+                      tooltip: l10n.volumeUp,
+                    ),
+                    _buildIconKey(
+                      Icons.play_arrow,
+                      'PLAYPAUSE',
+                      tooltip: l10n.playPause,
+                    ),
                     _buildTextKey('Home', 'HOME'),
                     _buildTextKey('End', 'END'),
                     _buildTextKey('PgUp', 'PAGEUP'),
@@ -110,22 +141,38 @@ class _SpecialKeysWidgetState extends State<SpecialKeysWidget> {
                   _buildModifierButton(
                     label: 'CTRL',
                     isActive: _ctrlActive,
-                    onTap: () => _toggleModifier('CTRL', _ctrlActive, (v) => setState(() => _ctrlActive = v)),
+                    onTap: () => _toggleModifier(
+                      'CTRL',
+                      _ctrlActive,
+                      (v) => setState(() => _ctrlActive = v),
+                    ),
                   ),
                   _buildModifierButton(
                     label: 'SUPER',
                     isActive: _superActive,
-                    onTap: () => _toggleModifier('SUPER', _superActive, (v) => setState(() => _superActive = v)),
+                    onTap: () => _toggleModifier(
+                      'SUPER',
+                      _superActive,
+                      (v) => setState(() => _superActive = v),
+                    ),
                   ),
                   _buildModifierButton(
                     label: 'ALT',
                     isActive: _altActive,
-                    onTap: () => _toggleModifier('ALT', _altActive, (v) => setState(() => _altActive = v)),
+                    onTap: () => _toggleModifier(
+                      'ALT',
+                      _altActive,
+                      (v) => setState(() => _altActive = v),
+                    ),
                   ),
                   _buildModifierButton(
                     label: 'SHIFT',
                     isActive: _shiftActive,
-                    onTap: () => _toggleModifier('SHIFT', _shiftActive, (v) => setState(() => _shiftActive = v)),
+                    onTap: () => _toggleModifier(
+                      'SHIFT',
+                      _shiftActive,
+                      (v) => setState(() => _shiftActive = v),
+                    ),
                   ),
                   // FN Button (Toggles secondary function row)
                   Expanded(
@@ -136,7 +183,10 @@ class _SpecialKeysWidgetState extends State<SpecialKeysWidget> {
                         label: const Center(
                           child: Text(
                             'FN',
-                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13,
+                            ),
                           ),
                         ),
                         showCheckmark: false,
@@ -188,7 +238,9 @@ class _SpecialKeysWidgetState extends State<SpecialKeysWidget> {
             foregroundColor: isActive ? theme.colorScheme.onPrimary : null,
             padding: const EdgeInsets.symmetric(vertical: 10),
             visualDensity: VisualDensity.compact,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
           ),
           child: Text(
             label,
@@ -209,9 +261,14 @@ class _SpecialKeysWidgetState extends State<SpecialKeysWidget> {
           style: OutlinedButton.styleFrom(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
             visualDensity: VisualDensity.compact,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
           ),
-          child: Text(label, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12)),
+          child: Text(
+            label,
+            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
+          ),
         ),
       ),
     );

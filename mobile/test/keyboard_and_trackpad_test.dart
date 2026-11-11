@@ -62,7 +62,9 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   group('Trackpad sensitivity persistence', () {
-    testWidgets('loads and saves sensitivity per device (ip-hostname)', (WidgetTester tester) async {
+    testWidgets('loads and saves sensitivity per device (ip-hostname)', (
+      WidgetTester tester,
+    ) async {
       SharedPreferences.setMockInitialValues({
         'sensitivity_192.168.1.100_laptop': 2.2,
       });
@@ -79,11 +81,11 @@ void main() {
 
       service.mockDevice = device;
 
-      await tester.pumpWidget(MaterialApp(
-        home: Scaffold(
-          body: TrackpadWidget(connectionService: service),
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: TrackpadWidget(connectionService: service)),
         ),
-      ));
+      );
       await tester.pumpAndSettle();
 
       // Sensitivity label should reflect loaded 2.2x
@@ -102,67 +104,78 @@ void main() {
   });
 
   group('KeyboardBarWidget tests', () {
-    testWidgets('does not clear text at 50 chars, expands multiline and clears silently on enter', (WidgetTester tester) async {
+    testWidgets(
+      'does not clear text at 50 chars, expands multiline and clears silently on enter',
+      (WidgetTester tester) async {
+        final service = MockConnectionService();
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(body: KeyboardBarWidget(connectionService: service)),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final textFieldFinder = find.byType(TextField);
+        expect(textFieldFinder, findsOneWidget);
+
+        final textField = tester.widget<TextField>(textFieldFinder);
+        expect(textField.minLines, 1);
+        expect(textField.maxLines, 4);
+        expect(textField.keyboardType, TextInputType.multiline);
+
+        // Enter more than 50 characters
+        const longText =
+            'This is a very long string with more than fifty characters to test that it does not clear!';
+        await tester.enterText(textFieldFinder, longText);
+        await tester.pumpAndSettle();
+
+        // Ensure the text wasn't cleared!
+        expect(find.text(longText), findsOneWidget);
+        expect(service.sentTexts.join(), longText);
+
+        // Tap the Enter button
+        final enterButton = find.byTooltip('Enter');
+        expect(enterButton, findsOneWidget);
+        await tester.tap(enterButton);
+        await tester.pumpAndSettle();
+
+        // Text field should be empty now
+        expect(find.text(longText), findsNothing);
+        expect(service.sentKeys.contains('ENTER:press'), isTrue);
+        // No backspaces should have been sent to host on Enter clear
+        expect(
+          service.sentKeys.where((k) => k.startsWith('BACKSPACE')).isEmpty,
+          isTrue,
+        );
+      },
+    );
+
+    testWidgets('renders Italian strings when locale is it', (
+      WidgetTester tester,
+    ) async {
       final service = MockConnectionService();
 
-      await tester.pumpWidget(MaterialApp(
-        home: Scaffold(
-          body: KeyboardBarWidget(connectionService: service),
-        ),
-      ));
-      await tester.pumpAndSettle();
-
-      final textFieldFinder = find.byType(TextField);
-      expect(textFieldFinder, findsOneWidget);
-
-      final textField = tester.widget<TextField>(textFieldFinder);
-      expect(textField.minLines, 1);
-      expect(textField.maxLines, 4);
-      expect(textField.keyboardType, TextInputType.multiline);
-
-      // Enter more than 50 characters
-      const longText = 'This is a very long string with more than fifty characters to test that it does not clear!';
-      await tester.enterText(textFieldFinder, longText);
-      await tester.pumpAndSettle();
-
-      // Ensure the text wasn't cleared!
-      expect(find.text(longText), findsOneWidget);
-      expect(service.sentTexts.join(), longText);
-
-      // Tap the Enter button
-      final enterButton = find.byTooltip('Enter');
-      expect(enterButton, findsOneWidget);
-      await tester.tap(enterButton);
-      await tester.pumpAndSettle();
-
-      // Text field should be empty now
-      expect(find.text(longText), findsNothing);
-      expect(service.sentKeys.contains('ENTER:press'), isTrue);
-      // No backspaces should have been sent to host on Enter clear
-      expect(service.sentKeys.where((k) => k.startsWith('BACKSPACE')).isEmpty, isTrue);
-    });
-
-    testWidgets('renders Italian strings when locale is it', (WidgetTester tester) async {
-      final service = MockConnectionService();
-
-      await tester.pumpWidget(MaterialApp(
-        locale: const Locale('it'),
-        supportedLocales: AppLocalizations.supportedLocales,
-        localizationsDelegates: const [
-          AppLocalizations.delegate,
-          GlobalMaterialLocalizations.delegate,
-          GlobalWidgetsLocalizations.delegate,
-          GlobalCupertinoLocalizations.delegate,
-        ],
-        home: Scaffold(
-          body: Column(
-            children: [
-              Expanded(child: TrackpadWidget(connectionService: service)),
-              KeyboardBarWidget(connectionService: service),
-            ],
+      await tester.pumpWidget(
+        MaterialApp(
+          locale: const Locale('it'),
+          supportedLocales: AppLocalizations.supportedLocales,
+          localizationsDelegates: const [
+            AppLocalizations.delegate,
+            GlobalMaterialLocalizations.delegate,
+            GlobalWidgetsLocalizations.delegate,
+            GlobalCupertinoLocalizations.delegate,
+          ],
+          home: Scaffold(
+            body: Column(
+              children: [
+                Expanded(child: TrackpadWidget(connectionService: service)),
+                KeyboardBarWidget(connectionService: service),
+              ],
+            ),
           ),
         ),
-      ));
+      );
       await tester.pumpAndSettle();
 
       // Check Italian labels
@@ -173,92 +186,105 @@ void main() {
       expect(find.byTooltip('Invio'), findsOneWidget);
     });
 
-    testWidgets('holding backspace sends continuous repeated signals and does not show tooltip', (WidgetTester tester) async {
-      final service = MockConnectionService();
+    testWidgets(
+      'holding backspace sends continuous repeated signals and does not show tooltip',
+      (WidgetTester tester) async {
+        final service = MockConnectionService();
 
-      await tester.pumpWidget(MaterialApp(
-        home: Scaffold(
-          body: KeyboardBarWidget(connectionService: service),
-        ),
-      ));
-      await tester.pumpAndSettle();
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(body: KeyboardBarWidget(connectionService: service)),
+          ),
+        );
+        await tester.pumpAndSettle();
 
-      final backspaceFinder = find.byIcon(Icons.backspace_outlined);
-      expect(backspaceFinder, findsOneWidget);
+        final backspaceFinder = find.byIcon(Icons.backspace_outlined);
+        expect(backspaceFinder, findsOneWidget);
 
-      // Verify no Tooltip widget wraps the backspace icon
-      expect(find.widgetWithIcon(Tooltip, Icons.backspace_outlined), findsNothing);
+        // Verify no Tooltip widget wraps the backspace icon
+        expect(
+          find.widgetWithIcon(Tooltip, Icons.backspace_outlined),
+          findsNothing,
+        );
 
-      // Touch down on the backspace button and hold
-      final gesture = await tester.startGesture(tester.getCenter(backspaceFinder));
-      await tester.pump();
+        // Touch down on the backspace button and hold
+        final gesture = await tester.startGesture(
+          tester.getCenter(backspaceFinder),
+        );
+        await tester.pump();
 
-      // Immediately 1 backspace sent
-      expect(service.sentKeys.where((k) => k == 'BACKSPACE:press').length, 1);
+        // Immediately 1 backspace sent
+        expect(service.sentKeys.where((k) => k == 'BACKSPACE:press').length, 1);
 
-      // Wait 400ms (typematic delay threshold)
-      await tester.pump(const Duration(milliseconds: 400));
-      expect(service.sentKeys.where((k) => k == 'BACKSPACE:press').length, 1);
+        // Wait 400ms (typematic delay threshold)
+        await tester.pump(const Duration(milliseconds: 400));
+        expect(service.sentKeys.where((k) => k == 'BACKSPACE:press').length, 1);
 
-      // Wait 180ms (should produce 3 more repeat signals: at 460ms, 520ms, 580ms)
-      await tester.pump(const Duration(milliseconds: 180));
-      expect(service.sentKeys.where((k) => k == 'BACKSPACE:press').length, 4);
+        // Wait 180ms (should produce 3 more repeat signals: at 460ms, 520ms, 580ms)
+        await tester.pump(const Duration(milliseconds: 180));
+        expect(service.sentKeys.where((k) => k == 'BACKSPACE:press').length, 4);
 
-      // Release finger
-      await gesture.up();
-      await tester.pump();
+        // Release finger
+        await gesture.up();
+        await tester.pump();
 
-      // Advance time further to ensure repeating has stopped
-      await tester.pump(const Duration(milliseconds: 300));
-      expect(service.sentKeys.where((k) => k == 'BACKSPACE:press').length, 4);
+        // Advance time further to ensure repeating has stopped
+        await tester.pump(const Duration(milliseconds: 300));
+        expect(service.sentKeys.where((k) => k == 'BACKSPACE:press').length, 4);
 
-      // Ensure no tooltip text popped up on long press
-      expect(find.text('Backspace'), findsNothing);
-    });
+        // Ensure no tooltip text popped up on long press
+        expect(find.text('Backspace'), findsNothing);
+      },
+    );
   });
 
   group('Trackpad gestures & right click tests', () {
-    testWidgets('two-finger tap triggers right click without moving cursor or scrolling', (WidgetTester tester) async {
+    testWidgets(
+      'two-finger tap triggers right click without moving cursor or scrolling',
+      (WidgetTester tester) async {
+        final service = MockConnectionService();
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(body: TrackpadWidget(connectionService: service)),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final trackpadFinder = find.byType(TrackpadWidget);
+        final center = tester.getCenter(trackpadFinder);
+
+        // Perform a simultaneous two-finger tap with slight natural micro-movement (< 3px)
+        final p1 = await tester.startGesture(center);
+        final p2 = await tester.startGesture(center + const Offset(50, 0));
+
+        await p1.moveBy(const Offset(1, 1));
+        await p2.moveBy(const Offset(0, 1));
+
+        // Lift both fingers
+        await p1.up();
+        await p2.up();
+        await tester.pumpAndSettle();
+
+        // Verified: Right click is sent
+        expect(service.sentMouseButtons, contains('right:click'));
+        // Verified: Cursor was NOT moved
+        expect(service.sentMouseMoves, isEmpty);
+        // Verified: No scroll events were sent
+        expect(service.sentMouseScrolls, isEmpty);
+      },
+    );
+
+    testWidgets('single-finger tap triggers left click without moving cursor', (
+      WidgetTester tester,
+    ) async {
       final service = MockConnectionService();
 
-      await tester.pumpWidget(MaterialApp(
-        home: Scaffold(
-          body: TrackpadWidget(connectionService: service),
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: TrackpadWidget(connectionService: service)),
         ),
-      ));
-      await tester.pumpAndSettle();
-
-      final trackpadFinder = find.byType(TrackpadWidget);
-      final center = tester.getCenter(trackpadFinder);
-
-      // Perform a simultaneous two-finger tap with slight natural micro-movement (< 3px)
-      final p1 = await tester.startGesture(center);
-      final p2 = await tester.startGesture(center + const Offset(50, 0));
-
-      await p1.moveBy(const Offset(1, 1));
-      await p2.moveBy(const Offset(0, 1));
-
-      // Lift both fingers
-      await p1.up();
-      await p2.up();
-      await tester.pumpAndSettle();
-
-      // Verified: Right click is sent
-      expect(service.sentMouseButtons, contains('right:click'));
-      // Verified: Cursor was NOT moved
-      expect(service.sentMouseMoves, isEmpty);
-      // Verified: No scroll events were sent
-      expect(service.sentMouseScrolls, isEmpty);
-    });
-
-    testWidgets('single-finger tap triggers left click without moving cursor', (WidgetTester tester) async {
-      final service = MockConnectionService();
-
-      await tester.pumpWidget(MaterialApp(
-        home: Scaffold(
-          body: TrackpadWidget(connectionService: service),
-        ),
-      ));
+      );
       await tester.pumpAndSettle();
 
       final trackpadFinder = find.byType(TrackpadWidget);
@@ -273,14 +299,16 @@ void main() {
       expect(service.sentMouseMoves, isEmpty);
     });
 
-    testWidgets('one-finger drag past deadzone moves mouse cursor', (WidgetTester tester) async {
+    testWidgets('one-finger drag past deadzone moves mouse cursor', (
+      WidgetTester tester,
+    ) async {
       final service = MockConnectionService();
 
-      await tester.pumpWidget(MaterialApp(
-        home: Scaffold(
-          body: TrackpadWidget(connectionService: service),
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: TrackpadWidget(connectionService: service)),
         ),
-      ));
+      );
       await tester.pumpAndSettle();
 
       final trackpadFinder = find.byType(TrackpadWidget);
@@ -298,81 +326,93 @@ void main() {
   });
 
   group('RemoteControlScreen navigation tests', () {
-    testWidgets('clicking back in AppBar disconnects and returns to previous screen without popping twice', (WidgetTester tester) async {
-      final service = MockConnectionService();
+    testWidgets(
+      'clicking back in AppBar disconnects and returns to previous screen without popping twice',
+      (WidgetTester tester) async {
+        final service = MockConnectionService();
 
-      await tester.pumpWidget(MaterialApp(
-        home: Scaffold(
-          body: Builder(
-            builder: (ctx) => ElevatedButton(
-              onPressed: () {
-                Navigator.of(ctx).push(
-                  MaterialPageRoute(
-                    builder: (_) => RemoteControlScreen(connectionService: service),
-                  ),
-                );
-              },
-              child: const Text('Open Remote'),
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: Builder(
+                builder: (ctx) => ElevatedButton(
+                  onPressed: () {
+                    Navigator.of(ctx).push(
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            RemoteControlScreen(connectionService: service),
+                      ),
+                    );
+                  },
+                  child: const Text('Open Remote'),
+                ),
+              ),
             ),
           ),
-        ),
-      ));
-      await tester.pumpAndSettle();
+        );
+        await tester.pumpAndSettle();
 
-      // Open remote screen
-      await tester.tap(find.text('Open Remote'));
-      await tester.pumpAndSettle();
-      expect(find.byType(RemoteControlScreen), findsOneWidget);
+        // Open remote screen
+        await tester.tap(find.text('Open Remote'));
+        await tester.pumpAndSettle();
+        expect(find.byType(RemoteControlScreen), findsOneWidget);
 
-      // Tap the back button in AppBar
-      final backButton = find.descendant(
-        of: find.byType(AppBar),
-        matching: find.byIcon(Icons.arrow_back),
-      );
-      expect(backButton, findsOneWidget);
-      await tester.tap(backButton);
-      await tester.pumpAndSettle();
+        // Tap the back button in AppBar
+        final backButton = find.descendant(
+          of: find.byType(AppBar),
+          matching: find.byIcon(Icons.arrow_back),
+        );
+        expect(backButton, findsOneWidget);
+        await tester.tap(backButton);
+        await tester.pumpAndSettle();
 
-      // Verify RemoteControlScreen is popped and the base screen is still present (not empty)
-      expect(find.byType(RemoteControlScreen), findsNothing);
-      expect(find.text('Open Remote'), findsOneWidget);
-      expect(service.disconnectCount, 1);
-    });
+        // Verify RemoteControlScreen is popped and the base screen is still present (not empty)
+        expect(find.byType(RemoteControlScreen), findsNothing);
+        expect(find.text('Open Remote'), findsOneWidget);
+        expect(service.disconnectCount, 1);
+      },
+    );
 
-    testWidgets('system back gesture disconnects cleanly and returns to previous screen', (WidgetTester tester) async {
-      final service = MockConnectionService();
-      final navKey = GlobalKey<NavigatorState>();
+    testWidgets(
+      'system back gesture disconnects cleanly and returns to previous screen',
+      (WidgetTester tester) async {
+        final service = MockConnectionService();
+        final navKey = GlobalKey<NavigatorState>();
 
-      await tester.pumpWidget(MaterialApp(
-        navigatorKey: navKey,
-        home: Scaffold(
-          body: Builder(
-            builder: (ctx) => ElevatedButton(
-              onPressed: () {
-                Navigator.of(ctx).push(
-                  MaterialPageRoute(
-                    builder: (_) => RemoteControlScreen(connectionService: service),
-                  ),
-                );
-              },
-              child: const Text('Open Remote'),
+        await tester.pumpWidget(
+          MaterialApp(
+            navigatorKey: navKey,
+            home: Scaffold(
+              body: Builder(
+                builder: (ctx) => ElevatedButton(
+                  onPressed: () {
+                    Navigator.of(ctx).push(
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            RemoteControlScreen(connectionService: service),
+                      ),
+                    );
+                  },
+                  child: const Text('Open Remote'),
+                ),
+              ),
             ),
           ),
-        ),
-      ));
-      await tester.pumpAndSettle();
+        );
+        await tester.pumpAndSettle();
 
-      await tester.tap(find.text('Open Remote'));
-      await tester.pumpAndSettle();
-      expect(find.byType(RemoteControlScreen), findsOneWidget);
+        await tester.tap(find.text('Open Remote'));
+        await tester.pumpAndSettle();
+        expect(find.byType(RemoteControlScreen), findsOneWidget);
 
-      // Trigger system back pop
-      await navKey.currentState!.maybePop();
-      await tester.pumpAndSettle();
+        // Trigger system back pop
+        await navKey.currentState!.maybePop();
+        await tester.pumpAndSettle();
 
-      expect(find.byType(RemoteControlScreen), findsNothing);
-      expect(find.text('Open Remote'), findsOneWidget);
-      expect(service.disconnectCount, 1);
-    });
+        expect(find.byType(RemoteControlScreen), findsNothing);
+        expect(find.text('Open Remote'), findsOneWidget);
+        expect(service.disconnectCount, 1);
+      },
+    );
   });
 }

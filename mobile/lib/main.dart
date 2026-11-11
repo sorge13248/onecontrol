@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+
 import 'l10n/app_localizations.dart';
 import 'screens/discovery_screen.dart';
 import 'services/connection_service.dart';
@@ -19,10 +20,12 @@ void main() async {
   final connectionService = ConnectionService();
   await connectionService.init();
 
-  runApp(OneControlApp(
-    discoveryService: discoveryService,
-    connectionService: connectionService,
-  ));
+  runApp(
+    OneControlApp(
+      discoveryService: discoveryService,
+      connectionService: connectionService,
+    ),
+  );
 }
 
 class OneControlApp extends StatelessWidget {
@@ -68,7 +71,9 @@ class OneControlApp extends StatelessWidget {
         cardTheme: const CardThemeData(
           color: Color(0xFF1E212B),
           elevation: 2,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.all(Radius.circular(12)),
+          ),
         ),
       ),
       theme: ThemeData(

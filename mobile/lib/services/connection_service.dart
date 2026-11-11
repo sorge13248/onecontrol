@@ -2,9 +2,11 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
+
 import '../models/host_device.dart';
 import '../models/protocol_messages.dart';
 
@@ -54,7 +56,9 @@ class ConnectionService extends ChangeNotifier {
       _clientId = 'client_${Random().nextInt(899999) + 100000}';
       await prefs.setString('onecontrol_client_id', _clientId!);
     }
-    _clientName = Platform.isAndroid ? 'Android Phone' : (Platform.isIOS ? 'iPhone' : 'OneControl Client');
+    _clientName = Platform.isAndroid
+        ? 'Android Phone'
+        : (Platform.isIOS ? 'iPhone' : 'OneControl Client');
   }
 
   Future<void> connect(HostDevice device) async {
@@ -62,7 +66,9 @@ class ConnectionService extends ChangeNotifier {
     _activeDevice = device;
     _updateStatus(
       ConnectionStateStatus.connecting,
-      _isItalian ? 'Connessione a ${device.hostname}...' : 'Connecting to ${device.hostname}...',
+      _isItalian
+          ? 'Connessione a ${device.hostname}...'
+          : 'Connecting to ${device.hostname}...',
     );
 
     try {
@@ -85,7 +91,9 @@ class ConnectionService extends ChangeNotifier {
         onError: (err) {
           _updateStatus(
             ConnectionStateStatus.error,
-            _isItalian ? 'Errore di connessione: $err' : 'Connection error: $err',
+            _isItalian
+                ? 'Errore di connessione: $err'
+                : 'Connection error: $err',
           );
           _cleanup();
         },
@@ -93,7 +101,9 @@ class ConnectionService extends ChangeNotifier {
           if (_status != ConnectionStateStatus.disconnected) {
             _updateStatus(
               ConnectionStateStatus.disconnected,
-              _isItalian ? 'Disconnesso dal server' : 'Disconnected from server',
+              _isItalian
+                  ? 'Disconnesso dal server'
+                  : 'Disconnected from server',
             );
           }
           _cleanup();
@@ -137,18 +147,25 @@ class ConnectionService extends ChangeNotifier {
             final serverMsg = json['message'] as String?;
             _updateStatus(
               ConnectionStateStatus.connected,
-              serverMsg ?? (_isItalian ? 'Connesso a ${_activeDevice?.hostname}' : 'Connected to ${_activeDevice?.hostname}'),
+              serverMsg ??
+                  (_isItalian
+                      ? 'Connesso a ${_activeDevice?.hostname}'
+                      : 'Connected to ${_activeDevice?.hostname}'),
             );
           } else if (authStatus == 'need_pin') {
             final serverMsg = json['message'] as String?;
             _updateStatus(
               ConnectionStateStatus.pinRequired,
-              serverMsg ?? (_isItalian ? 'Inserisci il PIN mostrato sul PC' : 'Enter the PIN shown on the PC'),
+              serverMsg ??
+                  (_isItalian
+                      ? 'Inserisci il PIN mostrato sul PC'
+                      : 'Enter the PIN shown on the PC'),
             );
           } else {
             _updateStatus(
               ConnectionStateStatus.error,
-              json['message'] ?? (_isItalian ? 'Connessione rifiutata' : 'Connection refused'),
+              json['message'] ??
+                  (_isItalian ? 'Connessione rifiutata' : 'Connection refused'),
             );
           }
           break;
@@ -165,13 +182,19 @@ class ConnectionService extends ChangeNotifier {
             final serverMsg = json['message'] as String?;
             _updateStatus(
               ConnectionStateStatus.connected,
-              serverMsg ?? (_isItalian ? 'Associazione completata! Connesso.' : 'Pairing completed! Connected.'),
+              serverMsg ??
+                  (_isItalian
+                      ? 'Associazione completata! Connesso.'
+                      : 'Pairing completed! Connected.'),
             );
           } else {
             final serverMsg = json['message'] as String?;
             _updateStatus(
               ConnectionStateStatus.pinRequired,
-              serverMsg ?? (_isItalian ? 'PIN errato. Riprova.' : 'Incorrect PIN. Try again.'),
+              serverMsg ??
+                  (_isItalian
+                      ? 'PIN errato. Riprova.'
+                      : 'Incorrect PIN. Try again.'),
             );
           }
           break;
@@ -181,7 +204,9 @@ class ConnectionService extends ChangeNotifier {
           break;
 
         case 'error':
-          final msg = json['message'] as String? ?? (_isItalian ? 'Errore dal server' : 'Server error');
+          final msg =
+              json['message'] as String? ??
+              (_isItalian ? 'Errore dal server' : 'Server error');
           _updateStatus(ConnectionStateStatus.error, msg);
           break;
       }

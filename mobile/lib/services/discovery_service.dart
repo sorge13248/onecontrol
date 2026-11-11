@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+
 import 'package:flutter/foundation.dart';
+
 import '../models/host_device.dart';
 
 class DiscoveryService extends ChangeNotifier {
@@ -14,8 +16,9 @@ class DiscoveryService extends ChangeNotifier {
   Timer? _broadcastTimer;
   bool _isScanning = false;
 
-  List<HostDevice> get devices => _devices.values.toList()
-    ..sort((a, b) => b.lastSeen.compareTo(a.lastSeen));
+  List<HostDevice> get devices =>
+      _devices.values.toList()
+        ..sort((a, b) => b.lastSeen.compareTo(a.lastSeen));
 
   bool get isScanning => _isScanning;
 
@@ -58,11 +61,7 @@ class DiscoveryService extends ChangeNotifier {
     if (_socket == null) return;
     final payload = utf8.encode(jsonEncode({'magic': discoveryMagic}));
     try {
-      _socket?.send(
-        payload,
-        InternetAddress('255.255.255.255'),
-        discoveryPort,
-      );
+      _socket?.send(payload, InternetAddress('255.255.255.255'), discoveryPort);
     } catch (e) {
       debugPrint('Broadcast send error: $e');
     }

@@ -1,6 +1,8 @@
 import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+
 import '../l10n/app_localizations.dart';
 import '../services/connection_service.dart';
 
@@ -47,7 +49,8 @@ class _KeyboardBarWidgetState extends State<KeyboardBarWidget> {
         ? currentText.length
         : _previousText.length;
     while (prefixLen < minLen &&
-        currentText.codeUnitAt(prefixLen) == _previousText.codeUnitAt(prefixLen)) {
+        currentText.codeUnitAt(prefixLen) ==
+            _previousText.codeUnitAt(prefixLen)) {
       prefixLen++;
     }
 
@@ -131,7 +134,9 @@ class _KeyboardBarWidgetState extends State<KeyboardBarWidget> {
 
     // Initial typematic delay (400ms), followed by rapid repeat every 60ms
     _backspaceDelayTimer = Timer(const Duration(milliseconds: 400), () {
-      _backspaceRepeatTimer = Timer.periodic(const Duration(milliseconds: 60), (_) {
+      _backspaceRepeatTimer = Timer.periodic(const Duration(milliseconds: 60), (
+        _,
+      ) {
         _sendBackspace();
       });
     });

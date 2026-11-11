@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+
 import '../l10n/app_localizations.dart';
 import '../services/connection_service.dart';
 import '../widgets/keyboard_bar_widget.dart';
@@ -80,7 +81,10 @@ class _RemoteControlScreenState extends State<RemoteControlScreen> {
             children: [
               Text(
                 device?.hostname ?? l10n.remoteControl,
-                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
               Row(
                 children: [
@@ -107,7 +111,10 @@ class _RemoteControlScreenState extends State<RemoteControlScreen> {
           actions: [
             IconButton(
               tooltip: l10n.disconnect,
-              icon: const Icon(Icons.power_settings_new, color: Colors.redAccent),
+              icon: const Icon(
+                Icons.power_settings_new,
+                color: Colors.redAccent,
+              ),
               onPressed: _handleExit,
             ),
           ],
@@ -123,14 +130,10 @@ class _RemoteControlScreenState extends State<RemoteControlScreen> {
               ),
 
               // Modifiers & special keys (CTRL, SUPER, FN, ALT, SHIFT, TAB, STAMP)
-              SpecialKeysWidget(
-                connectionService: widget.connectionService,
-              ),
+              SpecialKeysWidget(connectionService: widget.connectionService),
 
               // Keyboard input field and soft keyboard controls
-              KeyboardBarWidget(
-                connectionService: widget.connectionService,
-              ),
+              KeyboardBarWidget(connectionService: widget.connectionService),
             ],
           ),
         ),

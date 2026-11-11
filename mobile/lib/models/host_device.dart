@@ -20,23 +20,23 @@ class HostDevice {
   String get id => '$ip:$port';
 
   Map<String, dynamic> toJson() => {
-        'hostname': hostname,
-        'ip': ip,
-        'port': port,
-        'os': os,
-        'version': version,
-        'token': token,
-      };
+    'hostname': hostname,
+    'ip': ip,
+    'port': port,
+    'os': os,
+    'version': version,
+    'token': token,
+  };
 
   factory HostDevice.fromJson(Map<String, dynamic> json) => HostDevice(
-        hostname: json['hostname'] ?? 'Unknown',
-        ip: json['ip'] ?? '127.0.0.1',
-        port: json['port'] ?? 53842,
-        os: json['os'] ?? 'linux',
-        version: json['version'] ?? '0.1.0',
-        lastSeen: DateTime.now(),
-        token: json['token'],
-      );
+    hostname: json['hostname'] ?? 'Unknown',
+    ip: json['ip'] ?? '127.0.0.1',
+    port: json['port'] ?? 53842,
+    os: json['os'] ?? 'linux',
+    version: json['version'] ?? '0.1.0',
+    lastSeen: DateTime.now(),
+    token: json['token'],
+  );
 
   @override
   bool operator ==(Object other) =>

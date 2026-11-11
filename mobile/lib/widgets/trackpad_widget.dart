@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
 import '../l10n/app_localizations.dart';
 import '../models/host_device.dart';
 import '../services/connection_service.dart';
@@ -146,7 +147,8 @@ class _TrackpadWidgetState extends State<TrackpadWidget> {
       _accumulatedScrollY += delta.dy;
 
       // Only enter scrolling state once past deadzone to avoid scroll events during 2-finger taps
-      if (!_isScrolling && _accumulatedScrollY.abs() >= _kScrollStartThreshold) {
+      if (!_isScrolling &&
+          _accumulatedScrollY.abs() >= _kScrollStartThreshold) {
         _isScrolling = true;
       }
 
@@ -242,7 +244,10 @@ class _TrackpadWidgetState extends State<TrackpadWidget> {
               ),
               Text(
                 '${_sensitivity.toStringAsFixed(1)}x',
-                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ],
           ),
@@ -434,10 +439,7 @@ class _MouseButtonItemState extends State<_MouseButtonItem> {
     );
 
     if (widget.tooltip != null) {
-      content = Tooltip(
-        message: widget.tooltip!,
-        child: content,
-      );
+      content = Tooltip(message: widget.tooltip!, child: content);
     }
 
     return Listener(
@@ -452,7 +454,9 @@ class _MouseButtonItemState extends State<_MouseButtonItem> {
           color: _isDown ? bg.withAlpha(200) : bg,
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
-            color: _isDown ? theme.colorScheme.primary : theme.colorScheme.outlineVariant.withAlpha(80),
+            color: _isDown
+                ? theme.colorScheme.primary
+                : theme.colorScheme.outlineVariant.withAlpha(80),
             width: _isDown ? 2.0 : 1.0,
           ),
           boxShadow: _isDown

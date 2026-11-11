@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+
 import '../l10n/app_localizations.dart';
 import '../models/host_device.dart';
 import '../services/connection_service.dart';
@@ -43,15 +44,17 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
       // Navigate to Remote Control Screen
       if (mounted && !_isRemoteOpen) {
         _isRemoteOpen = true;
-        Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => RemoteControlScreen(
-              connectionService: widget.connectionService,
-            ),
-          ),
-        ).then((_) {
-          _isRemoteOpen = false;
-        });
+        Navigator.of(context)
+            .push(
+              MaterialPageRoute(
+                builder: (_) => RemoteControlScreen(
+                  connectionService: widget.connectionService,
+                ),
+              ),
+            )
+            .then((_) {
+              _isRemoteOpen = false;
+            });
       }
     }
   }
@@ -81,7 +84,11 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
               keyboardType: TextInputType.number,
               autofocus: true,
               maxLength: 6,
-              style: const TextStyle(fontSize: 24, letterSpacing: 8, fontWeight: FontWeight.bold),
+              style: const TextStyle(
+                fontSize: 24,
+                letterSpacing: 8,
+                fontWeight: FontWeight.bold,
+              ),
               textAlign: TextAlign.center,
               decoration: const InputDecoration(
                 hintText: '123456',
@@ -185,7 +192,10 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
           children: [
             const Icon(Icons.gamepad_outlined, color: Colors.blueAccent),
             const SizedBox(width: 8),
-            Text(l10n.appTitle, style: const TextStyle(fontWeight: FontWeight.bold)),
+            Text(
+              l10n.appTitle,
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
           ],
         ),
         actions: [
@@ -205,7 +215,10 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
         ],
       ),
       body: ListenableBuilder(
-        listenable: Listenable.merge([widget.discoveryService, widget.connectionService]),
+        listenable: Listenable.merge([
+          widget.discoveryService,
+          widget.connectionService,
+        ]),
         builder: (context, _) {
           final devices = widget.discoveryService.devices;
           final status = widget.connectionService.status;
@@ -219,7 +232,10 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                   status == ConnectionStateStatus.error) ...[
                 Container(
                   width: double.infinity,
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 10,
+                  ),
                   color: status == ConnectionStateStatus.error
                       ? theme.colorScheme.errorContainer
                       : theme.colorScheme.primaryContainer,
@@ -232,7 +248,11 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       else
-                        Icon(Icons.error_outline, color: theme.colorScheme.error, size: 20),
+                        Icon(
+                          Icons.error_outline,
+                          color: theme.colorScheme.error,
+                          size: 20,
+                        ),
                       const SizedBox(width: 12),
                       Expanded(
                         child: Text(
@@ -253,15 +273,25 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
 
               // Scanning indicator
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
                 color: theme.colorScheme.surfaceContainerHighest.withAlpha(80),
                 child: Row(
                   children: [
-                    const Icon(Icons.wifi_tethering, size: 16, color: Colors.blueAccent),
+                    const Icon(
+                      Icons.wifi_tethering,
+                      size: 16,
+                      color: Colors.blueAccent,
+                    ),
                     const SizedBox(width: 8),
                     Text(
                       l10n.searchingLan,
-                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
                     const Spacer(),
                     if (widget.discoveryService.isScanning)
@@ -283,17 +313,27 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(Icons.computer_outlined, size: 64, color: theme.colorScheme.outline),
+                              Icon(
+                                Icons.computer_outlined,
+                                size: 64,
+                                color: theme.colorScheme.outline,
+                              ),
                               const SizedBox(height: 16),
                               Text(
                                 l10n.noPcsFound,
-                                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                                style: const TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                ),
                               ),
                               const SizedBox(height: 8),
                               Text(
                                 l10n.ensureDaemonRunning,
                                 textAlign: TextAlign.center,
-                                style: TextStyle(fontSize: 13, color: theme.colorScheme.onSurfaceVariant),
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: theme.colorScheme.onSurfaceVariant,
+                                ),
                               ),
                               const SizedBox(height: 20),
                               OutlinedButton.icon(
@@ -313,36 +353,55 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                           return Card(
                             margin: const EdgeInsets.only(bottom: 10),
                             elevation: 1,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
                             child: ListTile(
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 8,
+                              ),
                               leading: CircleAvatar(
                                 radius: 24,
-                                backgroundColor: theme.colorScheme.primaryContainer,
+                                backgroundColor:
+                                    theme.colorScheme.primaryContainer,
                                 child: Icon(
                                   device.os == 'linux'
                                       ? Icons.terminal
-                                      : (device.os == 'windows' ? Icons.window : Icons.laptop_mac),
+                                      : (device.os == 'windows'
+                                            ? Icons.window
+                                            : Icons.laptop_mac),
                                   color: theme.colorScheme.primary,
                                 ),
                               ),
                               title: Text(
                                 device.hostname,
-                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 16,
+                                ),
                               ),
                               subtitle: Padding(
                                 padding: const EdgeInsets.only(top: 4),
                                 child: Row(
                                   children: [
                                     Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 6,
+                                        vertical: 2,
+                                      ),
                                       decoration: BoxDecoration(
-                                        color: theme.colorScheme.surfaceContainerHighest,
+                                        color: theme
+                                            .colorScheme
+                                            .surfaceContainerHighest,
                                         borderRadius: BorderRadius.circular(4),
                                       ),
                                       child: Text(
                                         '${device.ip}:${device.port}',
-                                        style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
+                                        style: const TextStyle(
+                                          fontSize: 12,
+                                          fontFamily: 'monospace',
+                                        ),
                                       ),
                                     ),
                                     const SizedBox(width: 8),
