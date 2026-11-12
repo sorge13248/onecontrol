@@ -49,7 +49,6 @@ onecontrol/
     ├── BUILD_ANDROID.md        # Manual Flutter build and APK packaging guide
     ├── ARCHITECTURE.md         # WebSocket protocol specifications and flow diagrams
     ├── FIREWALL.md             # Firewall configuration with firewall-cmd or UFW
-    └── OBTAINIUM.md            # Obtainium Android setup, auto-updates & keystore signing
 ```
 
 ---

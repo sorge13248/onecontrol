@@ -56,4 +56,79 @@ void main() {
     discoveryService.stopDiscovery();
     connectionService.disconnect();
   });
+
+  testWidgets('Discovery pauses on app background and resumes on foreground', (
+    WidgetTester tester,
+  ) async {
+    final discoveryService = DiscoveryService();
+    final connectionService = ConnectionService();
+
+    await tester.pumpWidget(
+      OneControlApp(
+        discoveryService: discoveryService,
+        connectionService: connectionService,
+      ),
+    );
+    await tester.pump();
+
+    expect(discoveryService.isScanning, isTrue);
+
+    // Simulate app going to background / locked
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.pump();
+    expect(discoveryService.isScanning, isFalse);
+
+    // Simulate app returning to foreground / unlocked
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    expect(discoveryService.isScanning, isTrue);
+
+    // Test manual refresh button
+    final refreshBtn = find.byTooltip('Refresh scan');
+    expect(refreshBtn, findsOneWidget);
+    await tester.tap(refreshBtn);
+    await tester.pump();
+    expect(discoveryService.isScanning, isTrue);
+
+    discoveryService.stopDiscovery();
+    connectionService.disconnect();
+  });
+
+  testWidgets(
+    'Discovery pauses on app background and resumes on foreground',
+    (WidgetTester tester) async {
+      final discoveryService = DiscoveryService();
+      final connectionService = ConnectionService();
+
+      await tester.pumpWidget(
+        OneControlApp(
+          discoveryService: discoveryService,
+          connectionService: connectionService,
+        ),
+      );
+      await tester.pump();
+
+      expect(discoveryService.isScanning, isTrue);
+
+      // Simulate app going to background / locked
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      await tester.pump();
+      expect(discoveryService.isScanning, isFalse);
+
+      // Simulate app returning to foreground / unlocked
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump();
+      expect(discoveryService.isScanning, isTrue);
+
+      // Test manual refresh button
+      final refreshBtn = find.byTooltip('Refresh scan');
+      expect(refreshBtn, findsOneWidget);
+      await tester.tap(refreshBtn);
+      await tester.pump();
+      expect(discoveryService.isScanning, isTrue);
+
+      discoveryService.stopDiscovery();
+      connectionService.disconnect();
+    },
+  );
 }

@@ -15,6 +15,7 @@ class DiscoveryService extends ChangeNotifier {
   RawDatagramSocket? _socket;
   Timer? _broadcastTimer;
   Timer? _recoveryTimer;
+  Timer? _followUpTimer;
   bool _isScanning = false;
   bool _isPaused = false;
   DateTime? _lastResumeTime;
@@ -35,6 +36,8 @@ class DiscoveryService extends ChangeNotifier {
     try {
       _recoveryTimer?.cancel();
       _recoveryTimer = null;
+      _followUpTimer?.cancel();
+      _followUpTimer = null;
       _broadcastTimer?.cancel();
       _socket?.close();
 
@@ -68,7 +71,8 @@ class DiscoveryService extends ChangeNotifier {
       _sendDiscoveryProbe();
 
       // Follow up with an extra probe after 800ms to catch Wi-Fi interface wakeups
-      Future.delayed(const Duration(milliseconds: 800), () {
+      _followUpTimer?.cancel();
+      _followUpTimer = Timer(const Duration(milliseconds: 800), () {
         if (_isScanning && !_isPaused) {
           _sendDiscoveryProbe();
         }
@@ -253,6 +257,8 @@ class DiscoveryService extends ChangeNotifier {
     _isPaused = true;
     _recoveryTimer?.cancel();
     _recoveryTimer = null;
+    _followUpTimer?.cancel();
+    _followUpTimer = null;
     _broadcastTimer?.cancel();
     _broadcastTimer = null;
     _socket?.close();
@@ -280,6 +286,8 @@ class DiscoveryService extends ChangeNotifier {
   void stopDiscovery() {
     _recoveryTimer?.cancel();
     _recoveryTimer = null;
+    _followUpTimer?.cancel();
+    _followUpTimer = null;
     _broadcastTimer?.cancel();
     _broadcastTimer = null;
     _socket?.close();
