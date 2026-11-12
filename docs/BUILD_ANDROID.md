@@ -12,10 +12,9 @@ Verify that the `flutter` command is available in your terminal:
 flutter --version
 ```
 > [!NOTE]
-> If Flutter is not in your `$PATH`, use its absolute path:
-> `/mnt/hdd3-linux-data/flutter/bin/flutter` or add it to your `~/.bashrc`:
+> If Flutter is not in your `$PATH`, add it to your `~/.bashrc` or `~/.profile`:
 > ```bash
-> export PATH="/mnt/hdd3-linux-data/flutter/bin:$PATH"
+> export PATH="/path/to/flutter/bin:$PATH"
 > ```
 
 ### 1.2 Android SDK & Java

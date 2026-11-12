@@ -26,10 +26,13 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Install Gitleaks
+        uses: taiki-e/install-action@v2
+        with:
+          tool: gitleaks
+
       - name: Gitleaks Secret Scanning
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gitleaks detect --verbose --redact
 
       - name: Install cargo-audit
         uses: taiki-e/install-action@cargo-audit

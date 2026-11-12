@@ -142,9 +142,10 @@ get_flutter_bin() {
 
     # Known system / installation paths
     local candidate_paths=(
-        "/mnt/hdd3-linux-data/flutter/bin/flutter"
         "$HOME/flutter/bin/flutter"
+        "$HOME/.local/bin/flutter"
         "/opt/flutter/bin/flutter"
+        "/usr/local/flutter/bin/flutter"
     )
     for p in "${candidate_paths[@]}"; do
         if [[ -x "$p" ]]; then
@@ -183,8 +184,8 @@ get_adb_bin() {
     fi
 
     local candidate_paths=(
-        "/mnt/hdd3-linux-data/android/platform-tools/adb"
         "$HOME/Android/Sdk/platform-tools/adb"
+        "$HOME/.local/bin/adb"
         "/opt/android-sdk/platform-tools/adb"
     )
     for p in "${candidate_paths[@]}"; do
