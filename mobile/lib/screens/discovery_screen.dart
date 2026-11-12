@@ -20,20 +20,36 @@ class DiscoveryScreen extends StatefulWidget {
   State<DiscoveryScreen> createState() => _DiscoveryScreenState();
 }
 
-class _DiscoveryScreenState extends State<DiscoveryScreen> {
+class _DiscoveryScreenState extends State<DiscoveryScreen>
+    with WidgetsBindingObserver {
   bool _isRemoteOpen = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     widget.discoveryService.startDiscovery();
     widget.connectionService.addListener(_onConnectionStateChanged);
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     widget.connectionService.removeListener(_onConnectionStateChanged);
+    widget.discoveryService.stopDiscovery();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      if (!_isRemoteOpen) {
+        widget.discoveryService.resumeDiscovery();
+      }
+    } else if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden) {
+      widget.discoveryService.pauseDiscovery();
+    }
   }
 
   void _onConnectionStateChanged() {
@@ -44,6 +60,7 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
       // Navigate to Remote Control Screen
       if (mounted && !_isRemoteOpen) {
         _isRemoteOpen = true;
+        widget.discoveryService.stopDiscovery();
         Navigator.of(context)
             .push(
               MaterialPageRoute(
@@ -54,6 +71,9 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
             )
             .then((_) {
               _isRemoteOpen = false;
+              if (mounted) {
+                widget.discoveryService.resumeDiscovery();
+              }
             });
       }
     }
@@ -208,8 +228,7 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
             tooltip: l10n.refreshScan,
             icon: const Icon(Icons.refresh),
             onPressed: () {
-              widget.discoveryService.stopDiscovery();
-              widget.discoveryService.startDiscovery();
+              widget.discoveryService.restartDiscovery();
             },
           ),
         ],
